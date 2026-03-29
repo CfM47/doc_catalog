@@ -32,7 +32,7 @@ impl SqliteDocumentRepository {
                 authors: metadata
                     .iter()
                     .find(|m| m.key == "authors")
-                    .map(|m| m.value.clone()),
+                    .and_then(|m| serde_json::from_str(&m.value).ok()),
                 edition: metadata
                     .iter()
                     .find(|m| m.key == "edition")
@@ -50,7 +50,7 @@ impl SqliteDocumentRepository {
                 authors: metadata
                     .iter()
                     .find(|m| m.key == "authors")
-                    .map(|m| m.value.clone()),
+                    .and_then(|m| serde_json::from_str(&m.value).ok()),
                 journal: metadata
                     .iter()
                     .find(|m| m.key == "journal")
@@ -94,13 +94,17 @@ impl SqliteDocumentRepository {
         let conn = self.conn.lock().unwrap();
         let metadata = match doc_type {
             DocumentType::Book(m) => vec![
-                m.authors.clone().map(|v| ("authors".to_string(), v)),
+                m.authors
+                    .clone()
+                    .map(|v| ("authors".to_string(), serde_json::to_string(&v).unwrap())),
                 m.edition.clone().map(|v| ("edition".to_string(), v)),
                 m.publisher.clone().map(|v| ("publisher".to_string(), v)),
                 m.isbn.clone().map(|v| ("isbn".to_string(), v)),
             ],
             DocumentType::Paper(m) => vec![
-                m.authors.clone().map(|v| ("authors".to_string(), v)),
+                m.authors
+                    .clone()
+                    .map(|v| ("authors".to_string(), serde_json::to_string(&v).unwrap())),
                 m.journal.clone().map(|v| ("journal".to_string(), v)),
                 m.volume.clone().map(|v| ("volume".to_string(), v)),
                 m.issue.clone().map(|v| ("issue".to_string(), v)),

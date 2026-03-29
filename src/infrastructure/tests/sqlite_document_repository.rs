@@ -121,7 +121,7 @@ fn test_document_with_metadata() {
         0,
         "Rust Book".to_string(),
         DocumentType::Book(BookMetadata {
-            authors: Some("John Doe".to_string()),
+            authors: Some(vec!["John Doe".to_string()]),
             edition: Some("2nd".to_string()),
             publisher: Some("O'Reilly".to_string()),
             isbn: Some("978-1491950357".to_string()),
@@ -141,7 +141,7 @@ fn test_document_with_metadata() {
 
     match found.doc_type {
         DocumentType::Book(m) => {
-            assert_eq!(m.authors, Some("John Doe".to_string()));
+            assert_eq!(m.authors, Some(vec!["John Doe".to_string()]));
             assert_eq!(m.edition, Some("2nd".to_string()));
             assert_eq!(m.publisher, Some("O'Reilly".to_string()));
             assert_eq!(m.isbn, Some("978-1491950357".to_string()));

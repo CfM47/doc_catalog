@@ -6,7 +6,7 @@ fn create_valid_doc() -> Document {
         1,
         "Test Document".to_string(),
         DocumentType::Book(BookMetadata {
-            authors: Some("John Doe".to_string()),
+            authors: Some(vec!["John Doe".to_string()]),
             edition: None,
             publisher: None,
             isbn: None,

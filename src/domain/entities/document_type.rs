@@ -28,7 +28,7 @@ impl DocumentType {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct BookMetadata {
-    pub authors: Option<String>,
+    pub authors: Option<Vec<String>>,
     pub edition: Option<String>,
     pub publisher: Option<String>,
     pub isbn: Option<String>,
@@ -42,7 +42,7 @@ impl BookMetadata {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PaperMetadata {
-    pub authors: Option<String>,
+    pub authors: Option<Vec<String>>,
     pub journal: Option<String>,
     pub volume: Option<String>,
     pub issue: Option<String>,
