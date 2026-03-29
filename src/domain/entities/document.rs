@@ -1,5 +1,6 @@
 use super::{BookMetadata, DocumentType, NotesMetadata};
 use crate::domain::errors::DomainError;
+use crate::domain::utils::validate_tags;
 
 #[allow(dead_code)]
 const MIN_YEAR: i32 = 1000;
@@ -74,6 +75,8 @@ impl Document {
                 return Err(DomainError::TagTooLong(tag.clone()));
             }
         }
+
+        validate_tags(&self.tags)?;
 
         Ok(())
     }

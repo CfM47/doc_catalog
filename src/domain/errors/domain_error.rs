@@ -7,6 +7,7 @@ pub enum DomainError {
     InvalidDocumentType(String),
     TooManyTags(usize),
     TagTooLong(String),
+    InvalidTagFormat(String),
 }
 
 impl std::fmt::Display for DomainError {
@@ -24,6 +25,13 @@ impl std::fmt::Display for DomainError {
             }
             DomainError::TagTooLong(tag) => {
                 write!(f, "Tag too long: '{}'. Maximum is 30 characters", tag)
+            }
+            DomainError::InvalidTagFormat(tag) => {
+                write!(
+                    f,
+                    "Invalid tag format: '{}'. Must be kebab-case (lowercase, numbers, hyphens only)",
+                    tag
+                )
             }
         }
     }
