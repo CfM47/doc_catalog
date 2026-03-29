@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use crate::application::dto::ListDocumentsFilter;
 use crate::application::repositories::DocumentRepository;
 use crate::domain::entities::{Document, DocumentType, NotesMetadata};
 
@@ -38,6 +39,61 @@ impl DocumentRepository for MockDocumentRepository {
 
     fn find_all(&self) -> Result<Vec<Document>, anyhow::Error> {
         Ok(self.documents.lock().unwrap().values().cloned().collect())
+    }
+
+    fn find_all_with_filter(
+        &self,
+        filter: ListDocumentsFilter,
+    ) -> Result<Vec<Document>, anyhow::Error> {
+        if filter.is_empty() {
+            return self.find_all();
+        }
+
+        let mut docs: Vec<Document> = self.documents.lock().unwrap().values().cloned().collect();
+
+        if let Some(doc_types) = &filter.doc_types {
+            if !doc_types.is_empty() {
+                docs.retain(|doc| doc_types.contains(&doc.doc_type.as_str().to_string()));
+            }
+        }
+
+        if let Some(tags) = &filter.tags {
+            if !tags.is_empty() {
+                docs.retain(|doc| doc.tags.iter().any(|t| tags.contains(t)));
+            }
+        }
+
+        if let Some(authors) = &filter.authors {
+            if !authors.is_empty() {
+                docs.retain(|doc| match &doc.doc_type {
+                    DocumentType::Book(m) => {
+                        if let Some(doc_authors) = &m.authors {
+                            doc_authors.iter().any(|a| {
+                                authors
+                                    .iter()
+                                    .any(|f| a.to_lowercase().contains(&f.to_lowercase()))
+                            })
+                        } else {
+                            false
+                        }
+                    }
+                    DocumentType::Paper(m) => {
+                        if let Some(doc_authors) = &m.authors {
+                            doc_authors.iter().any(|a| {
+                                authors
+                                    .iter()
+                                    .any(|f| a.to_lowercase().contains(&f.to_lowercase()))
+                            })
+                        } else {
+                            false
+                        }
+                    }
+                    _ => false,
+                });
+            }
+        }
+
+        Ok(docs)
     }
 
     fn update(&self, document: Document) -> Result<Document, anyhow::Error> {

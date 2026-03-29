@@ -276,6 +276,111 @@ impl DocumentRepository for SqliteDocumentRepository {
         Ok(documents)
     }
 
+    fn find_all_with_filter(
+        &self,
+        filter: crate::application::dto::ListDocumentsFilter,
+    ) -> Result<Vec<Document>, anyhow::Error> {
+        if filter.is_empty() {
+            return self.find_all();
+        }
+
+        let raw_documents = {
+            let conn = self.conn.lock().unwrap();
+
+            let mut sql = String::from(
+                "SELECT DISTINCT d.id, d.title, d.doc_type, d.year, d.source, d.url, d.tags, d.notes, d.created_at, d.updated_at 
+                 FROM documents d"
+            );
+
+            let need_metadata_join = filter.authors.is_some();
+            if need_metadata_join {
+                sql.push_str(" LEFT JOIN document_metadata m ON d.id = m.document_id");
+            }
+
+            let mut conditions = Vec::new();
+            let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+            if let Some(doc_types) = &filter.doc_types
+                && !doc_types.is_empty()
+            {
+                let placeholders: Vec<String> = doc_types.iter().map(|_| "?".to_string()).collect();
+                conditions.push(format!("d.doc_type IN ({})", placeholders.join(",")));
+                for dt in doc_types {
+                    params.push(Box::new(dt.clone()));
+                }
+            }
+
+            if let Some(tags) = &filter.tags
+                && !tags.is_empty()
+            {
+                for tag in tags {
+                    conditions.push(format!("d.tags LIKE '%\"{}\"%'", tag));
+                }
+            }
+
+            if need_metadata_join
+                && let Some(authors) = &filter.authors
+                && !authors.is_empty()
+            {
+                let author_conditions: Vec<String> = authors
+                    .iter()
+                    .map(|a| {
+                        format!(
+                            "(m.key = 'authors' AND LOWER(m.value) LIKE '%{}%')",
+                            a.to_lowercase()
+                        )
+                    })
+                    .collect();
+                conditions.push(format!("({})", author_conditions.join(" OR ")));
+            }
+
+            if !conditions.is_empty() {
+                sql.push_str(" WHERE ");
+                sql.push_str(&conditions.join(" AND "));
+            }
+
+            sql.push_str(" ORDER BY d.id");
+
+            let params_ref: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
+            let mut stmt = conn.prepare(&sql)?;
+
+            let rows = stmt.query_map(params_ref.as_slice(), |row| {
+                let tags_json: Option<String> = row.get(6)?;
+                let tags: Vec<String> = tags_json
+                    .map(|t| serde_json::from_str(&t).unwrap_or_default())
+                    .unwrap_or_default();
+                Ok((
+                    Document {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        doc_type: crate::domain::entities::DocumentType::Notes(
+                            crate::domain::entities::NotesMetadata {},
+                        ),
+                        year: row.get(3)?,
+                        source: row.get(4)?,
+                        url: row.get(5)?,
+                        tags,
+                        notes: row.get(7)?,
+                        created_at: row.get(8)?,
+                        updated_at: row.get(9)?,
+                    },
+                    row.get::<_, String>(2)?,
+                ))
+            })?;
+
+            rows.filter_map(|r| r.ok()).collect::<Vec<_>>()
+        };
+
+        let mut documents = Vec::new();
+        for (mut doc, doc_type_str) in raw_documents {
+            let metadata = self.load_metadata(doc.id)?;
+            doc.doc_type = Self::string_to_doc_type(&doc_type_str, metadata);
+            documents.push(doc);
+        }
+
+        Ok(documents)
+    }
+
     fn update(&self, document: Document) -> Result<Document, anyhow::Error> {
         let conn = self.conn.lock().unwrap();
         let doc_type_str = Self::doc_type_to_string(&document.doc_type);

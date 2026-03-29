@@ -7,4 +7,5 @@ pub mod utils;
 mod tests {
     mod create_document;
     mod document_repository;
+    mod list_documents;
 }

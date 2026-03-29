@@ -37,6 +37,13 @@ impl DocumentRepository for MockRepository {
         unimplemented!()
     }
 
+    fn find_all_with_filter(
+        &self,
+        _filter: crate::application::dto::ListDocumentsFilter,
+    ) -> Result<Vec<Document>, anyhow::Error> {
+        unimplemented!()
+    }
+
     fn update(&self, _document: Document) -> Result<Document, anyhow::Error> {
         unimplemented!()
     }

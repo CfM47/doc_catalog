@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::application::dto::{CreateDocumentInput, CreateDocumentOutput};
 use crate::application::repositories::DocumentRepository;
 use crate::application::utils::now_iso8601;
