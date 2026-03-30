@@ -381,6 +381,63 @@ impl DocumentRepository for SqliteDocumentRepository {
         Ok(documents)
     }
 
+    fn search(&self, query: &str) -> Result<Vec<Document>, anyhow::Error> {
+        let query_lower = query.to_lowercase();
+
+        let raw_documents = {
+            let conn = self.conn.lock().unwrap();
+
+            let sql = String::from(
+                "SELECT DISTINCT d.id, d.title, d.doc_type, d.year, d.source, d.url, d.tags, d.notes, d.created_at, d.updated_at 
+                 FROM documents d
+                 LEFT JOIN document_metadata m ON d.id = m.document_id
+                 WHERE LOWER(d.title) LIKE ?1
+                    OR LOWER(d.tags) LIKE ?1
+                    OR LOWER(d.notes) LIKE ?1
+                    OR LOWER(m.value) LIKE ?1
+                 ORDER BY d.id"
+            );
+
+            let pattern = format!("%{}%", query_lower);
+            let mut stmt = conn.prepare(&sql)?;
+
+            let rows = stmt.query_map([&pattern], |row| {
+                let tags_json: Option<String> = row.get(6)?;
+                let tags: Vec<String> = tags_json
+                    .map(|t| serde_json::from_str(&t).unwrap_or_default())
+                    .unwrap_or_default();
+                Ok((
+                    Document {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        doc_type: crate::domain::entities::DocumentType::Notes(
+                            crate::domain::entities::NotesMetadata {},
+                        ),
+                        year: row.get(3)?,
+                        source: row.get(4)?,
+                        url: row.get(5)?,
+                        tags,
+                        notes: row.get(7)?,
+                        created_at: row.get(8)?,
+                        updated_at: row.get(9)?,
+                    },
+                    row.get::<_, String>(2)?,
+                ))
+            })?;
+
+            rows.filter_map(|r| r.ok()).collect::<Vec<_>>()
+        };
+
+        let mut documents = Vec::new();
+        for (mut doc, doc_type_str) in raw_documents {
+            let metadata = self.load_metadata(doc.id)?;
+            doc.doc_type = Self::string_to_doc_type(&doc_type_str, metadata);
+            documents.push(doc);
+        }
+
+        Ok(documents)
+    }
+
     fn update(&self, document: Document) -> Result<Document, anyhow::Error> {
         let conn = self.conn.lock().unwrap();
         let doc_type_str = Self::doc_type_to_string(&document.doc_type);

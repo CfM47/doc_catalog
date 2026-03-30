@@ -44,6 +44,10 @@ impl DocumentRepository for MockRepository {
         unimplemented!()
     }
 
+    fn search(&self, _query: &str) -> Result<Vec<Document>, anyhow::Error> {
+        unimplemented!()
+    }
+
     fn update(&self, _document: Document) -> Result<Document, anyhow::Error> {
         unimplemented!()
     }

@@ -102,6 +102,29 @@ impl DocumentRepository for MockRepository {
         Ok(docs)
     }
 
+    fn search(&self, query: &str) -> Result<Vec<Document>, anyhow::Error> {
+        let query_lower = query.to_lowercase();
+        let docs: Vec<Document> = self
+            .documents
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|doc| {
+                doc.title.to_lowercase().contains(&query_lower)
+                    || doc
+                        .tags
+                        .iter()
+                        .any(|t| t.to_lowercase().contains(&query_lower))
+                    || doc
+                        .notes
+                        .as_ref()
+                        .map_or(false, |n| n.to_lowercase().contains(&query_lower))
+            })
+            .cloned()
+            .collect();
+        Ok(docs)
+    }
+
     fn update(&self, _document: Document) -> Result<Document, anyhow::Error> {
         unimplemented!()
     }
