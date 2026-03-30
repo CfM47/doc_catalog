@@ -9,4 +9,5 @@ mod tests {
     mod document_repository;
     mod list_documents;
     mod search_documents;
+    mod update_document;
 }
