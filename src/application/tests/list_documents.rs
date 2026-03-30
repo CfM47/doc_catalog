@@ -49,8 +49,6 @@ impl DocumentRepository for MockRepository {
         &self,
         filter: ListDocumentsFilter,
     ) -> Result<Vec<Document>, anyhow::Error> {
-        use crate::domain::entities::BookMetadata;
-
         if filter.is_empty() {
             return self.find_all();
         }
