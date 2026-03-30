@@ -1,10 +1,12 @@
 pub mod commands;
+pub mod dependencies;
 
 #[cfg(test)]
 mod tests;
 
 use crate::application::repositories::DocumentRepository;
 use clap::{Parser, Subcommand};
+use dependencies::CliDependencies;
 
 #[derive(Parser)]
 #[command(name = "doclib")]
@@ -21,10 +23,13 @@ pub enum Commands {
     Search,
 }
 
-pub fn run<R: DocumentRepository>(repo: &R, cli: Cli) -> anyhow::Result<()> {
+pub fn run<R: DocumentRepository + Clone>(
+    deps: CliDependencies<R>,
+    cli: Cli,
+) -> anyhow::Result<()> {
     match cli.command {
-        Commands::Add => commands::add::run(repo),
-        Commands::List => commands::list::run(repo),
-        Commands::Search => commands::search::run(repo),
+        Commands::Add => commands::add::run(deps),
+        Commands::List => commands::list::run(deps),
+        Commands::Search => commands::search::run(deps),
     }
 }

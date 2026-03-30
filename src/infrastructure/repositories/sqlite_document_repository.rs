@@ -8,6 +8,7 @@ use crate::domain::entities::{
 };
 use crate::infrastructure::database::ConnectionRef;
 
+#[derive(Clone)]
 pub struct SqliteDocumentRepository {
     conn: ConnectionRef,
 }

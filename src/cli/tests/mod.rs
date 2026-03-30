@@ -1,4 +1,7 @@
 #[cfg(test)]
+mod add_command;
+
+#[cfg(test)]
 mod tests {
     use clap::Parser;
 

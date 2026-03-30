@@ -24,6 +24,15 @@ impl DocumentType {
             DocumentType::Notes(_) => NotesMetadata::keys(),
         }
     }
+
+    pub fn authors(&self) -> Option<Vec<String>> {
+        match self {
+            DocumentType::Book(m) => m.authors.clone(),
+            DocumentType::Paper(m) => m.authors.clone(),
+            DocumentType::Lecture(_) => None,
+            DocumentType::Notes(_) => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

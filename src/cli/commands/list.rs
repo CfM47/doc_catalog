@@ -1,8 +1,9 @@
 #![allow(dead_code)]
 
 use crate::application::repositories::DocumentRepository;
+use crate::cli::dependencies::CliDependencies;
 
-pub fn run<R: DocumentRepository>(_repo: &R) -> anyhow::Result<()> {
+pub fn run<R: DocumentRepository + Clone>(_deps: CliDependencies<R>) -> anyhow::Result<()> {
     println!("list command not implemented yet");
     Ok(())
 }

@@ -8,6 +8,7 @@ use clap::Parser;
 use std::path::PathBuf;
 
 use cli::Cli;
+use cli::dependencies::CliDependencies;
 use infrastructure::database::Database;
 use infrastructure::repositories::SqliteDocumentRepository;
 
@@ -26,8 +27,9 @@ fn main() -> anyhow::Result<()> {
     infrastructure::database::initialize(&db.conn).context("Failed to initialize database")?;
 
     let repo = SqliteDocumentRepository::new(db.conn);
+    let deps = CliDependencies::new(repo);
 
-    cli::run(&repo, cli)?;
+    cli::run(deps, cli)?;
 
     Ok(())
 }
