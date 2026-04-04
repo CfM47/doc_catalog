@@ -15,7 +15,8 @@ impl<R: DocumentRepository> ListDocumentsUseCase<R> {
         input: ListDocumentsInput,
     ) -> Result<Vec<DocumentSummaryOutput>, anyhow::Error> {
         let filter = ListDocumentsFilter::from(input);
-        let documents = self.repository.find_all_with_filter(filter)?;
+        let mut documents = self.repository.find_all_with_filter(filter)?;
+        documents.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
         let summaries = documents
             .into_iter()
             .map(DocumentSummaryOutput::from)
