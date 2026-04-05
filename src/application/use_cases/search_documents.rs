@@ -16,7 +16,8 @@ impl<R: DocumentRepository> SearchDocumentsUseCase<R> {
         &self,
         input: SearchDocumentsInput,
     ) -> Result<Vec<DocumentSummaryOutput>, anyhow::Error> {
-        let documents = self.repository.search(&input.query)?;
+        let mut documents = self.repository.search(&input.query)?;
+        documents.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
         let results = documents
             .into_iter()
             .map(DocumentSummaryOutput::from)

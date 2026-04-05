@@ -5,6 +5,9 @@ mod add_command;
 mod list_command;
 
 #[cfg(test)]
+mod search_command;
+
+#[cfg(test)]
 mod tests {
     use clap::Parser;
 
