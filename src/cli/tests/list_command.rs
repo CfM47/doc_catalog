@@ -3,6 +3,7 @@
 use crate::application::dto::ListDocumentsInput;
 use crate::application::tests::utils::MockRepository;
 use crate::cli::dependencies::CliDependencies;
+use crate::cli::printer::CliPrinter;
 use crate::domain::entities::{BookMetadata, Document, DocumentType};
 
 #[cfg(test)]
@@ -10,7 +11,10 @@ mod tests {
     use super::*;
 
     fn create_deps_with_docs(docs: Vec<Document>) -> CliDependencies<MockRepository> {
-        CliDependencies::new(MockRepository::with_documents(docs))
+        CliDependencies::new(
+            MockRepository::with_documents(docs),
+            CliPrinter::with_default_config(),
+        )
     }
 
     #[test]

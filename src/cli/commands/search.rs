@@ -3,7 +3,6 @@ use dialoguer::Input;
 use crate::application::dto::SearchDocumentsInput;
 use crate::application::repositories::DocumentRepository;
 use crate::cli::dependencies::CliDependencies;
-use crate::cli::utils::truncate;
 
 pub fn run<R: DocumentRepository + Clone>(deps: CliDependencies<R>) -> anyhow::Result<()> {
     let query: String = Input::new().with_prompt("Search query").interact()?;
@@ -12,20 +11,15 @@ pub fn run<R: DocumentRepository + Clone>(deps: CliDependencies<R>) -> anyhow::R
     let results = deps.search_documents.execute(input)?;
 
     if results.is_empty() {
-        println!("No matching documents found.");
+        deps.printer.print_no_matches();
         return Ok(());
     }
 
-    println!("{:<4} {:<30} {:<10}", "ID", "Title", "Type");
-    println!("{:-<4} {:-^30} {:-<10}", "", "", "");
+    deps.printer.print_search_header();
 
     for doc in results {
-        println!(
-            "{:<4} {:<30} {:<10}",
-            doc.id,
-            truncate(&doc.title, 30),
-            doc.doc_type
-        );
+        deps.printer
+            .print_search_row(doc.id, &doc.title, &doc.doc_type);
     }
 
     Ok(())

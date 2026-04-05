@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod dependencies;
+pub mod printer;
 pub mod utils;
 
 #[cfg(test)]

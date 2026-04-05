@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use cli::Cli;
 use cli::dependencies::CliDependencies;
+use cli::printer::CliPrinter;
 use infrastructure::database::Database;
 use infrastructure::repositories::SqliteDocumentRepository;
 
@@ -27,7 +28,8 @@ fn main() -> anyhow::Result<()> {
     infrastructure::database::initialize(&db.conn).context("Failed to initialize database")?;
 
     let repo = SqliteDocumentRepository::new(db.conn);
-    let deps = CliDependencies::new(repo);
+    let printer = CliPrinter::with_default_config();
+    let deps = CliDependencies::new(repo, printer);
 
     cli::run(deps, cli)?;
 

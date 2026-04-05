@@ -2,6 +2,7 @@
 
 use crate::application::tests::utils::MockRepository;
 use crate::cli::dependencies::CliDependencies;
+use crate::cli::printer::CliPrinter;
 use crate::domain::entities::{BookMetadata, DocumentType};
 
 #[cfg(test)]
@@ -9,7 +10,7 @@ mod tests {
     use super::*;
 
     fn create_deps() -> CliDependencies<MockRepository> {
-        CliDependencies::new(MockRepository::new())
+        CliDependencies::new(MockRepository::new(), CliPrinter::with_default_config())
     }
 
     #[test]

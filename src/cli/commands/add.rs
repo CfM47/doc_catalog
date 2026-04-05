@@ -3,7 +3,6 @@ use dialoguer::{Confirm, Input, Select};
 use crate::application::dto::CreateDocumentInput;
 use crate::application::repositories::DocumentRepository;
 use crate::cli::dependencies::CliDependencies;
-use crate::cli::utils::truncate;
 use crate::domain::entities::{
     BookMetadata, DocumentType, LectureMetadata, NotesMetadata, PaperMetadata,
 };
@@ -19,42 +18,17 @@ pub fn run<R: DocumentRepository + Clone>(deps: CliDependencies<R>) -> anyhow::R
     let tags = prompt_tags()?;
     let notes = prompt_notes()?;
 
-    println!();
-    println!("┌──────────────────────────────────────────┐");
-    println!("│  Add Document                            │");
-    println!("├──────────────────────────────────────────┤");
-    println!("│  Type:    {:30} │", doc_type.as_str());
-    println!("│  Title:   {:30} │", truncate(&title, 30));
-    if let Some(authors) = metadata.authors() {
-        println!("│  Authors: {:30} │", truncate(&authors.join(", "), 30));
-    }
-    if let Some(y) = year {
-        println!("│  Year:    {:30} │", y);
-    } else {
-        println!("│  Year:    {:30} │", "-");
-    }
-    if let Some(ref s) = source {
-        println!("│  Source:  {:30} │", truncate(s, 30));
-    } else {
-        println!("│  Source:  {:30} │", "-");
-    }
-    if let Some(ref u) = url {
-        println!("│  URL:     {:30} │", truncate(u, 30));
-    } else {
-        println!("│  URL:     {:30} │", "-");
-    }
-    if tags.is_empty() {
-        println!("│  Tags:    {:30} │", "-");
-    } else {
-        println!("│  Tags:    {:30} │", truncate(&tags.join(", "), 30));
-    }
-    if let Some(ref n) = notes {
-        println!("│  Notes:   {:30} │", truncate(n, 30));
-    } else {
-        println!("│  Notes:   {:30} │", "-");
-    }
-    println!("└──────────────────────────────────────────┘");
-    println!();
+    let authors = metadata.authors();
+    deps.printer.print_document_summary(
+        doc_type.as_str(),
+        &title,
+        authors.as_ref(),
+        year,
+        source.as_deref(),
+        url.as_deref(),
+        &tags,
+        notes.as_deref(),
+    );
 
     if !Confirm::with_theme(&dialoguer::theme::ColorfulTheme::default())
         .with_prompt("Save this document?")
