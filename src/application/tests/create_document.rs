@@ -1,61 +1,8 @@
-use std::collections::HashMap;
-use std::sync::Mutex;
-
 use crate::application::dto::CreateDocumentInput;
 use crate::application::repositories::DocumentRepository;
+use crate::application::tests::utils::MockRepository;
 use crate::application::use_cases::CreateDocumentUseCase;
-use crate::domain::entities::{Document, DocumentType, NotesMetadata};
-
-struct MockRepository {
-    documents: Mutex<HashMap<i64, Document>>,
-    next_id: Mutex<i64>,
-}
-
-impl MockRepository {
-    fn new() -> Self {
-        Self {
-            documents: Mutex::new(HashMap::new()),
-            next_id: Mutex::new(1),
-        }
-    }
-}
-
-impl DocumentRepository for MockRepository {
-    fn create(&self, mut document: Document) -> Result<Document, anyhow::Error> {
-        let id = *self.next_id.lock().unwrap();
-        *self.next_id.lock().unwrap() += 1;
-        document.id = id;
-        self.documents.lock().unwrap().insert(id, document.clone());
-        Ok(document)
-    }
-
-    fn find_by_id(&self, _id: i64) -> Result<Document, anyhow::Error> {
-        unimplemented!()
-    }
-
-    fn find_all(&self) -> Result<Vec<Document>, anyhow::Error> {
-        unimplemented!()
-    }
-
-    fn find_all_with_filter(
-        &self,
-        _filter: crate::application::dto::ListDocumentsFilter,
-    ) -> Result<Vec<Document>, anyhow::Error> {
-        unimplemented!()
-    }
-
-    fn search(&self, _query: &str) -> Result<Vec<Document>, anyhow::Error> {
-        unimplemented!()
-    }
-
-    fn update(&self, _document: Document) -> Result<Document, anyhow::Error> {
-        unimplemented!()
-    }
-
-    fn delete(&self, _id: i64) -> Result<(), anyhow::Error> {
-        unimplemented!()
-    }
-}
+use crate::domain::entities::{DocumentType, NotesMetadata};
 
 #[test]
 fn test_create_document_success() {

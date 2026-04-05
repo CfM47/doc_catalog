@@ -1,6 +1,7 @@
 use crate::application::dto::ListDocumentsInput;
 use crate::application::repositories::DocumentRepository;
 use crate::cli::dependencies::CliDependencies;
+use crate::cli::utils::truncate;
 
 pub fn run<R: DocumentRepository + Clone>(deps: CliDependencies<R>) -> anyhow::Result<()> {
     let input = ListDocumentsInput {
@@ -34,12 +35,4 @@ pub fn run<R: DocumentRepository + Clone>(deps: CliDependencies<R>) -> anyhow::R
     }
 
     Ok(())
-}
-
-fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len - 3])
-    }
 }

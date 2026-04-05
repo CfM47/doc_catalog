@@ -1,75 +1,8 @@
 #![allow(dead_code)]
 
-use std::sync::Mutex;
-
-use crate::application::repositories::DocumentRepository;
+use crate::application::tests::utils::MockRepository;
 use crate::cli::dependencies::CliDependencies;
-use crate::domain::entities::{BookMetadata, Document, DocumentType};
-
-struct MockRepository {
-    documents: Mutex<Vec<Document>>,
-}
-
-impl MockRepository {
-    fn new() -> Self {
-        Self {
-            documents: Mutex::new(Vec::new()),
-        }
-    }
-}
-
-impl DocumentRepository for MockRepository {
-    fn create(&self, document: Document) -> anyhow::Result<Document> {
-        let mut docs = self.documents.lock().unwrap();
-        let mut doc = document;
-        doc.id = docs.len() as i64 + 1;
-        docs.push(doc.clone());
-        Ok(doc)
-    }
-
-    fn find_by_id(&self, id: i64) -> anyhow::Result<Document> {
-        let docs = self.documents.lock().unwrap();
-        docs.iter()
-            .find(|d| d.id == id)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("Not found"))
-    }
-
-    fn find_all(&self) -> anyhow::Result<Vec<Document>> {
-        Ok(self.documents.lock().unwrap().clone())
-    }
-
-    fn find_all_with_filter(
-        &self,
-        _filter: crate::application::dto::ListDocumentsFilter,
-    ) -> anyhow::Result<Vec<Document>> {
-        Ok(self.documents.lock().unwrap().clone())
-    }
-
-    fn search(&self, _query: &str) -> anyhow::Result<Vec<Document>> {
-        Ok(self.documents.lock().unwrap().clone())
-    }
-
-    fn update(&self, document: Document) -> anyhow::Result<Document> {
-        let mut docs = self.documents.lock().unwrap();
-        if let Some(idx) = docs.iter().position(|d| d.id == document.id) {
-            docs[idx] = document.clone();
-            Ok(document)
-        } else {
-            Err(anyhow::anyhow!("Not found"))
-        }
-    }
-
-    fn delete(&self, _id: i64) -> anyhow::Result<()> {
-        Ok(())
-    }
-}
-
-impl Clone for MockRepository {
-    fn clone(&self) -> Self {
-        Self::new()
-    }
-}
+use crate::domain::entities::{BookMetadata, DocumentType};
 
 #[cfg(test)]
 mod tests {

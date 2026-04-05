@@ -3,6 +3,7 @@ use dialoguer::{Confirm, Input, Select};
 use crate::application::dto::CreateDocumentInput;
 use crate::application::repositories::DocumentRepository;
 use crate::cli::dependencies::CliDependencies;
+use crate::cli::utils::truncate;
 use crate::domain::entities::{
     BookMetadata, DocumentType, LectureMetadata, NotesMetadata, PaperMetadata,
 };
@@ -21,7 +22,7 @@ pub fn run<R: DocumentRepository + Clone>(deps: CliDependencies<R>) -> anyhow::R
     println!();
     println!("┌──────────────────────────────────────────┐");
     println!("│  Add Document                            │");
-    println!("├──────────────────────────────────────────┤"); 
+    println!("├──────────────────────────────────────────┤");
     println!("│  Type:    {:30} │", doc_type.as_str());
     println!("│  Title:   {:30} │", truncate(&title, 30));
     if let Some(authors) = metadata.authors() {
@@ -78,14 +79,6 @@ pub fn run<R: DocumentRepository + Clone>(deps: CliDependencies<R>) -> anyhow::R
     println!("Document created with ID: {}", result.id);
 
     Ok(())
-}
-
-fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len - 3])
-    }
 }
 
 fn prompt_doc_type() -> anyhow::Result<DocumentType> {
