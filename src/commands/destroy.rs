@@ -15,12 +15,15 @@ pub fn run(conn: Connection, cfg: &Config, remote: bool, assume_yes: bool) -> Re
     let tags = db::tag_counts(&conn)?;
     let cached = cache::stats(cfg)?;
 
-    let stored = if remote {
-        storage::check_ready(cfg)?;
-        storage::list(cfg)?
-            .into_iter()
-            .filter(|(path, _)| is_doclib_file(path))
-            .collect()
+    let stored: Vec<(String, String, u64)> = if remote {
+        let reachable = storage::check_ready(cfg)?;
+        let mut all = Vec::new();
+        for r in &reachable.usable {
+            for (path, size) in storage::list(r)? {
+                all.push((r.clone(), path, size));
+            }
+        }
+        all
     } else {
         Vec::new()
     };
@@ -40,17 +43,19 @@ pub fn run(conn: Connection, cfg: &Config, remote: bool, assume_yes: bool) -> Re
     );
 
     if remote {
-        let bytes: u64 = stored.iter().map(|(_, size)| size).sum();
-        println!(
-            "  {} stored file(s), {}, from {}",
-            stored.len(),
-            cache::human_bytes(bytes),
-            cfg.remote
-        );
+        for r in &cfg.remotes {
+            let files: Vec<_> = stored.iter().filter(|(from, _, _)| from == r).collect();
+            let bytes: u64 = files.iter().map(|(_, _, size)| size).sum();
+            println!(
+                "  {} stored file(s), {}, from {r}",
+                files.len(),
+                cache::human_bytes(bytes)
+            );
+        }
     } else {
         println!(
-            "\nthe stored files at {} are kept. re-run with --remote to delete those too.",
-            cfg.remote
+            "\nthe stored files on {} remote(s) are kept. re-run with --remote to delete those too.",
+            cfg.remotes.len()
         );
     }
 
@@ -66,14 +71,17 @@ pub fn run(conn: Connection, cfg: &Config, remote: bool, assume_yes: bool) -> Re
 
     // Remote first: if it fails, the catalog still describes what is out there.
     let mut deleted_remote = 0;
-    for (path, _) in &stored {
-        match storage::delete(cfg, path) {
+    for (from, path, _) in &stored {
+        match storage::delete(from, path) {
             Ok(()) => deleted_remote += 1,
-            Err(e) => eprintln!("  failed to delete {path}: {e:#}"),
+            Err(e) => eprintln!("  failed to delete {path} from {from}: {e:#}"),
         }
     }
     if remote {
-        println!("deleted {deleted_remote} file(s) from {}", cfg.remote);
+        println!(
+            "deleted {deleted_remote} file(s) across {} remote(s)",
+            cfg.remotes.len()
+        );
     }
 
     // Close the database before unlinking it, so SQLite does not write the
@@ -106,48 +114,4 @@ fn remove_database(cfg: &Config) -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// Only touch files this tool wrote: `<two hex>/<64 hex>.<ext>`. A remote
-/// pointed at a shared folder may hold things that are none of our business.
-fn is_doclib_file(path: &str) -> bool {
-    let Some((shard, name)) = path.split_once('/') else {
-        return false;
-    };
-    let Some((hash, ext)) = name.rsplit_once('.') else {
-        return false;
-    };
-    let hex = |s: &str| s.chars().all(|c| c.is_ascii_hexdigit());
-
-    shard.len() == 2
-        && hex(shard)
-        && hash.len() == 64
-        && hex(hash)
-        && hash.starts_with(shard)
-        && !ext.is_empty()
-        && ext.chars().all(|c| c.is_ascii_alphanumeric())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn recognises_files_this_tool_wrote() {
-        let hash = "920c622478f05bf785b0549899ce6e670dbc1c9ba5d3699a718f07d31d4a6105";
-        assert!(is_doclib_file(&format!("92/{hash}.pdf")));
-        assert!(is_doclib_file(&format!("92/{hash}.epub")));
-    }
-
-    #[test]
-    fn leaves_everything_else_alone() {
-        let hash = "920c622478f05bf785b0549899ce6e670dbc1c9ba5d3699a718f07d31d4a6105";
-        // Someone else's files sharing the remote must survive a --remote wipe.
-        assert!(!is_doclib_file("holiday-photos/beach.jpg"));
-        assert!(!is_doclib_file("notes.txt"));
-        assert!(!is_doclib_file("92/not-a-hash.pdf"));
-        assert!(!is_doclib_file(&format!("{hash}.pdf")));
-        // Shard must match the hash it claims to shard.
-        assert!(!is_doclib_file(&format!("ab/{hash}.pdf")));
-    }
 }

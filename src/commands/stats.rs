@@ -38,6 +38,8 @@ pub fn run(conn: &Connection, cfg: &Config) -> Result<()> {
         }
     );
 
+    println!("remotes    {}", cfg.remotes.len());
+
     let years: Vec<i64> = documents.iter().filter_map(|d| d.year).collect();
     if let (Some(min), Some(max)) = (years.iter().min(), years.iter().max()) {
         println!("years      {min}–{max}");

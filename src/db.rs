@@ -158,6 +158,14 @@ pub fn tombstones(conn: &Connection) -> Result<Vec<Tombstone>> {
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+/// Stored paths that have been deleted and must not be copied back by
+/// `update`, keyed by path since that is what a remote listing gives us.
+pub fn tombstoned_paths(conn: &Connection) -> Result<std::collections::HashSet<String>> {
+    let mut stmt = conn.prepare("SELECT remote_path FROM deleted_documents")?;
+    let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+    Ok(rows.collect::<rusqlite::Result<std::collections::HashSet<_>>>()?)
+}
+
 pub fn forget_tombstone(conn: &Connection, hash: &str) -> Result<()> {
     conn.execute(
         "DELETE FROM deleted_documents WHERE content_hash = ?1",

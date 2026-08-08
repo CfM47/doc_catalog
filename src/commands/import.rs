@@ -22,7 +22,7 @@ pub fn run(
     auto: bool,
     forced_kind: Option<Kind>,
 ) -> Result<()> {
-    storage::check_ready(cfg)?;
+    let reachable = storage::check_ready(cfg)?;
 
     let files = collect(path);
     if files.is_empty() {
@@ -36,7 +36,7 @@ pub fn run(
 
     for (index, file) in files.iter().enumerate() {
         println!("[{}/{}] {}", index + 1, files.len(), file.display());
-        match import_one(conn, cfg, file, auto, forced_kind) {
+        match import_one(conn, cfg, &reachable.usable, file, auto, forced_kind) {
             Ok(true) => added += 1,
             Ok(false) => skipped += 1,
             // Ctrl-C means stop, not "fail this one and carry on through the
@@ -82,6 +82,7 @@ fn collect(path: &Path) -> Vec<PathBuf> {
 fn import_one(
     conn: &Connection,
     cfg: &Config,
+    remotes: &[String],
     file: &Path,
     auto: bool,
     forced_kind: Option<Kind>,
@@ -124,9 +125,7 @@ fn import_one(
     };
 
     let cached = cache::store(cfg, file, &hash, &ext)?;
-    print!("  uploading... ");
-    storage::upload(cfg, &cached, &doc.remote_path)?;
-    println!("done");
+    upload_everywhere(remotes, &cached, &doc.remote_path)?;
 
     db::insert(conn, &doc)?;
     // These bytes are catalogued again, so any pending purge no longer applies.
@@ -141,6 +140,43 @@ fn import_one(
 
     println!("  added {:?}", doc.title);
     Ok(true)
+}
+
+/// Push to every remote. A single failure is not fatal — `doclib update` will
+/// copy the file across later — but landing nowhere would leave the catalog
+/// pointing at bytes that only exist in the cache, which `cache prune` deletes.
+fn upload_everywhere(remotes: &[String], local: &std::path::Path, remote_rel: &str) -> Result<()> {
+    print!("  uploading...");
+    let mut stored = 0;
+    let mut failures = Vec::new();
+
+    for remote in remotes {
+        match storage::upload(remote, local, remote_rel) {
+            Ok(()) => {
+                print!(" {remote} ok");
+                stored += 1;
+            }
+            Err(e) => {
+                print!(" {remote} FAILED");
+                failures.push(format!("    {remote}: {e:#}"));
+            }
+        }
+    }
+    println!();
+    for failure in &failures {
+        println!("{failure}");
+    }
+
+    if stored == 0 {
+        anyhow::bail!("no remote accepted the file");
+    }
+    if !failures.is_empty() {
+        println!(
+            "    stored on {stored} of {} remotes — `doclib update` will finish it",
+            remotes.len()
+        );
+    }
+    Ok(())
 }
 
 fn guess_kind(found: &Extracted) -> Kind {

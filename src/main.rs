@@ -113,8 +113,14 @@ enum Command {
     },
     /// Summarise the catalog and show where metadata is missing
     Stats,
-    /// Verify the remote holds every catalogued document
+    /// Verify every remote holds every catalogued document
     Sync,
+    /// Copy files between remotes until they all hold the same set
+    Update {
+        /// Show what would be copied without copying anything
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Delete stored files that no catalog entry points at
     Purge {
         /// Skip the confirmation prompt
@@ -137,9 +143,9 @@ enum Command {
     },
     /// Open the config in $EDITOR, or change one setting directly
     Config {
-        /// Set the storage remote and exit, without opening an editor
-        #[arg(long, value_name = "REMOTE")]
-        remote: Option<String>,
+        /// Set the storage remotes and exit, without opening an editor
+        #[arg(long = "remote", value_name = "REMOTE", num_args = 1..)]
+        remotes: Vec<String>,
         /// Print the current settings instead of editing
         #[arg(long)]
         show: bool,
@@ -198,6 +204,7 @@ fn main() -> Result<()> {
         Command::Restore { file } => commands::export::restore(&conn, &cfg, file),
         Command::Stats => commands::stats::run(&conn, &cfg),
         Command::Sync => commands::sync::run(&conn, &cfg),
+        Command::Update { dry_run } => commands::update::run(&conn, &cfg, *dry_run),
         Command::Purge { assume_yes } => commands::purge::run(&conn, &cfg, *assume_yes),
         Command::Destroy { remote, assume_yes } => {
             commands::destroy::run(conn, &cfg, *remote, *assume_yes)
@@ -206,8 +213,10 @@ fn main() -> Result<()> {
             CacheAction::Status => commands::cache_cmd::status(&cfg),
             CacheAction::Prune { max } => commands::cache_cmd::prune(&conn, &cfg, *max),
         },
-        Command::Config { remote, show, path } => {
-            commands::config_cmd::run(&cfg, remote.as_deref(), *show, *path)
-        }
+        Command::Config {
+            remotes,
+            show,
+            path,
+        } => commands::config_cmd::run(&cfg, remotes, *show, *path),
     }
 }

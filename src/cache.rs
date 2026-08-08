@@ -40,11 +40,25 @@ pub fn ensure_cached(conn: &Connection, cfg: &Config, doc: &Document) -> Result<
     if path.exists() {
         return Ok(path);
     }
-    crate::storage::check_ready(cfg)?;
-    println!("fetching {} from {}...", doc.title, cfg.remote);
-    crate::storage::download(cfg, &doc.remote_path, &path)?;
-    db::mark_cached(conn, &doc.id, Some(&crate::now()))?;
-    Ok(path)
+    let reachable = crate::storage::check_ready(cfg)?;
+
+    // Config order is read preference; the first remote holding it wins.
+    let mut last_error = None;
+    for remote in &reachable.usable {
+        println!("fetching {} from {remote}...", doc.title);
+        match crate::storage::download(remote, &doc.remote_path, &path) {
+            Ok(()) => {
+                db::mark_cached(conn, &doc.id, Some(&crate::now()))?;
+                return Ok(path);
+            }
+            Err(e) => last_error = Some(e),
+        }
+    }
+
+    match last_error {
+        Some(e) => Err(e).with_context(|| format!("no remote holds {:?}", doc.title)),
+        None => anyhow::bail!("no remote is reachable"),
+    }
 }
 
 pub struct CacheStats {

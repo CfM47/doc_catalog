@@ -36,11 +36,14 @@ pub fn run(
         println!("  - the cached file at {}", cached.display());
     }
     if purge {
-        println!("  - the stored copy at {}/{}", cfg.remote, doc.remote_path);
+        for remote in &cfg.remotes {
+            println!("  - the stored copy at {remote}/{}", doc.remote_path);
+        }
+        println!("  (unreachable remotes are cleaned up by a later `doclib purge`)");
     } else {
         println!(
-            "\nthe stored copy at {}/{} is kept, and `doclib purge` can delete it later.",
-            cfg.remote, doc.remote_path
+            "\nthe stored copies of {} are kept, and `doclib purge` can delete them later.",
+            doc.remote_path
         );
     }
 
@@ -52,10 +55,32 @@ pub fn run(
     // Purge first: if it fails, the catalog entry survives and still points at
     // the file, so nothing is orphaned.
     if purge {
-        storage::check_ready(cfg)?;
-        storage::delete(cfg, &doc.remote_path)?;
-        db::forget_tombstone(conn, &doc.content_hash)?;
-        println!("deleted from {}", cfg.remote);
+        let reachable = storage::check_ready(cfg)?;
+        let mut survives = reachable.unusable.len();
+
+        for remote in &reachable.usable {
+            match storage::delete(remote, &doc.remote_path) {
+                Ok(()) => println!("deleted from {remote}"),
+                Err(e) => {
+                    eprintln!("  failed to delete from {remote}: {e:#}");
+                    survives += 1;
+                }
+            }
+        }
+
+        if survives > 0 {
+            // A copy is still out there — on the disconnected USB disk, most
+            // likely. Record the deletion so `update` treats the file as gone
+            // rather than copying it back, and let `purge` finish the job when
+            // that remote is next available.
+            db::tombstone(conn, &doc)?;
+            println!(
+                "\n{survives} remote(s) still hold this file. it will not be copied back, \
+                 and `doclib purge` removes it there once they are reachable."
+            );
+        } else {
+            db::forget_tombstone(conn, &doc.content_hash)?;
+        }
     } else {
         // The file outlives the catalog entry, so remember what it was —
         // otherwise `doclib purge` could only report it as a bare hash.

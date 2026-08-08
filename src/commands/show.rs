@@ -55,10 +55,12 @@ pub fn run(conn: &Connection, cfg: &Config, query: &str) -> Result<()> {
             "no (fetched on open)".to_string()
         }),
     );
-    out.add_owned(
-        "remote",
-        Some(format!("{}/{}", cfg.remote, doc.remote_path)),
-    );
+    for (index, remote) in cfg.remotes.iter().enumerate() {
+        out.add_owned(
+            if index == 0 { "remote" } else { "" },
+            Some(format!("{remote}/{}", doc.remote_path)),
+        );
+    }
     out.add("added", Some(&doc.added_at));
     out.add(
         "last opened",

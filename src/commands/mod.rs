@@ -13,3 +13,4 @@ pub mod show;
 pub mod stats;
 pub mod sync;
 pub mod tag;
+pub mod update;

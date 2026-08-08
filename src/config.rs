@@ -7,8 +7,14 @@ use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
-    /// rclone remote, including any subpath. e.g. "gdrive:doclib"
-    pub remote: String,
+    /// Every remote the library is replicated to. Order is read preference.
+    #[serde(default)]
+    pub remotes: Vec<String>,
+
+    /// Superseded by `remotes`, still read so older configs keep working.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    remote: Option<String>,
+
     /// Cache eviction ceiling in bytes. 0 disables pruning.
     pub cache_max_bytes: u64,
     /// Per-extension opener override. Falls back to $DOCLIB_OPENER, then xdg-open.
@@ -25,8 +31,9 @@ impl Default for Config {
         Config {
             // Deliberately empty. Any guess here would be wrong for most
             // people, and a wrong-looking value that happens to parse is worse
-            // than none: `remote = "books"` silently uploads to ./books.
-            remote: String::new(),
+            // than none: `remotes = ["books"]` silently uploads to ./books.
+            remotes: Vec::new(),
+            remote: None,
             cache_max_bytes: 20 * 1024 * 1024 * 1024,
             openers,
             data_dir: PathBuf::new(),
@@ -56,7 +63,7 @@ impl Config {
             let default = Config::default();
             fs::write(&config_file, default.to_toml()?)?;
             eprintln!("wrote default config to {}", config_file.display());
-            eprintln!("set `remote` before importing — see the comments in that file.");
+            eprintln!("set `remotes` before importing — see the comments in that file.");
         }
 
         let text = fs::read_to_string(&config_file)
@@ -64,7 +71,19 @@ impl Config {
         let mut cfg: Config =
             toml::from_str(&text).with_context(|| format!("parsing {}", config_file.display()))?;
         cfg.data_dir = data_dir;
+        cfg.absorb_legacy_remote();
         Ok(cfg)
+    }
+
+    /// A config written before multi-remote support has `remote = "..."`.
+    /// Treat it as a one-element list rather than making the user edit.
+    fn absorb_legacy_remote(&mut self) {
+        if let Some(legacy) = self.remote.take()
+            && self.remotes.is_empty()
+            && !legacy.trim().is_empty()
+        {
+            self.remotes.push(legacy);
+        }
     }
 
     fn to_toml(&self) -> Result<String> {
@@ -72,42 +91,19 @@ impl Config {
         Ok(format!("{CONFIG_HEADER}\n{body}"))
     }
 
-    /// Reject a remote that rclone would accept but that does not mean what the
-    /// user thinks. Anything without a colon is a local filesystem path, and a
-    /// relative one resolves against the current directory — so the same
-    /// command run from two shells would use two different stores.
-    pub fn validate_remote(&self) -> Result<()> {
-        let remote = self.remote.trim();
-
-        if remote.is_empty() {
+    pub fn validate_remotes(&self) -> Result<()> {
+        if self.remotes.is_empty() {
             bail!(
-                "no remote configured.\n\
-                 set `remote` in {}\n\
+                "no remotes configured.\n\
+                 set `remotes` in {}\n\
                  list your configured rclone remotes with `rclone listremotes`.",
                 config_path()?.display()
             );
         }
-
-        // ":s3:bucket" and friends are rclone connection strings: a full
-        // backend definition inline, no configured remote needed.
-        if remote.starts_with(':') || remote.starts_with('/') {
-            return Ok(());
+        for remote in &self.remotes {
+            validate_remote(remote)?;
         }
-
-        // A colon before the first slash means "configured remote".
-        let head = remote.split('/').next().unwrap_or(remote);
-        if head.contains(':') {
-            return Ok(());
-        }
-
-        bail!(
-            "remote {remote:?} is a relative local path, so where files go depends on \
-             the directory you run doclib from.\n\
-             use a configured rclone remote (\"{remote}:doclib\", if that is the remote's \
-             name) or an absolute path (\"/home/you/{remote}\").\n\
-             edit {}",
-            config_path()?.display()
-        );
+        Ok(())
     }
 
     pub fn db_path(&self) -> PathBuf {
@@ -125,23 +121,57 @@ impl Config {
             .join(format!("{hash}.{ext}"))
     }
 
-    /// Remote layout mirrors the cache so a bare `rclone sync` stays meaningful.
+    /// The same on every remote, since it is derived from the content hash.
     pub fn remote_path(&self, hash: &str, ext: &str) -> String {
         format!("{}/{}.{}", &hash[..2], hash, ext)
     }
 }
 
+/// Reject a remote that rclone would accept but that does not mean what the
+/// user thinks. Anything without a colon is a local filesystem path, and a
+/// relative one resolves against the current directory — so the same command
+/// run from two shells would use two different stores.
+pub fn validate_remote(remote: &str) -> Result<()> {
+    let remote = remote.trim();
+
+    if remote.is_empty() {
+        bail!("empty remote in `remotes`");
+    }
+
+    // ":s3:bucket" and friends are rclone connection strings: a full backend
+    // definition inline, no configured remote needed.
+    if remote.starts_with(':') || remote.starts_with('/') {
+        return Ok(());
+    }
+
+    // A colon before the first slash means "configured remote".
+    let head = remote.split('/').next().unwrap_or(remote);
+    if head.contains(':') {
+        return Ok(());
+    }
+
+    bail!(
+        "remote {remote:?} is a relative local path, so where files go depends on \
+         the directory you run doclib from.\n\
+         use a configured rclone remote (\"{remote}:doclib\", if that is the remote's \
+         name) or an absolute path (\"/home/you/{remote}\")."
+    );
+}
+
 const CONFIG_HEADER: &str = r#"# doclib configuration
 #
-# remote
-#   Where documents are stored, in rclone's own syntax. Run
-#   `rclone listremotes` to see what you have configured, and
+# remotes
+#   Every place the library is stored, in rclone's own syntax. Documents are
+#   uploaded to all of them; `doclib update` copies whatever is missing between
+#   them so they converge. The first is tried first when reading.
+#
+#   Run `rclone listremotes` to see what you have configured, and
 #   `rclone config` to add one. Any backend rclone supports works:
 #
-#     remote = "gdrive:doclib"        a configured remote named "gdrive"
-#     remote = "dropbox:books"        any other configured remote
-#     remote = "b2:my-bucket/doclib"  bucket storage, with a subpath
-#     remote = "/mnt/usb/doclib"      an absolute local path, no remote needed
+#     remotes = ["gdrive:doclib"]                   one configured remote
+#     remotes = ["gdrive:doclib", "/mnt/usb/lib"]   cloud plus a local disk
+#     remotes = ["b2:my-bucket/doclib"]             bucket storage with a path
+#     remotes = [":s3:my-bucket"]                   an inline connection string
 #
 #   A bare name with no colon ("doclib") is NOT a remote — rclone reads it as a
 #   relative local directory, so the destination would follow your shell's
@@ -149,7 +179,7 @@ const CONFIG_HEADER: &str = r#"# doclib configuration
 #
 # cache_max_bytes
 #   Local cache ceiling. `doclib cache prune` evicts least-recently-opened
-#   files above it; they are re-fetched from the remote on the next open.
+#   files above it; they are re-fetched from a remote on the next open.
 #   Set 0 to never evict.
 #
 # openers
@@ -161,9 +191,9 @@ const CONFIG_HEADER: &str = r#"# doclib configuration
 mod tests {
     use super::*;
 
-    fn with_remote(remote: &str) -> Config {
+    fn with_remotes(remotes: &[&str]) -> Config {
         Config {
-            remote: remote.to_string(),
+            remotes: remotes.iter().map(|r| r.to_string()).collect(),
             ..Default::default()
         }
     }
@@ -177,10 +207,9 @@ mod tests {
             "onedrive:",
             ":s3:my-bucket/doclib",
             "/mnt/usb/doclib",
-            "/home/someone/doclib",
         ] {
             assert!(
-                with_remote(remote).validate_remote().is_ok(),
+                validate_remote(remote).is_ok(),
                 "rejected valid remote {remote:?}"
             );
         }
@@ -192,22 +221,54 @@ mod tests {
         // working directory rather than any configured backend.
         for remote in ["doclib", "books/doclib", "./doclib", "../shared"] {
             assert!(
-                with_remote(remote).validate_remote().is_err(),
+                validate_remote(remote).is_err(),
                 "accepted relative path {remote:?}"
             );
         }
     }
 
     #[test]
-    fn rejects_an_unset_remote() {
-        assert!(with_remote("").validate_remote().is_err());
-        assert!(with_remote("   ").validate_remote().is_err());
+    fn every_remote_in_the_list_is_checked() {
+        assert!(
+            with_remotes(&["gdrive:doclib", "/mnt/usb"])
+                .validate_remotes()
+                .is_ok()
+        );
+        // One bad entry invalidates the config, wherever it sits.
+        assert!(
+            with_remotes(&["gdrive:doclib", "books"])
+                .validate_remotes()
+                .is_err()
+        );
+        assert!(
+            with_remotes(&["books", "gdrive:doclib"])
+                .validate_remotes()
+                .is_err()
+        );
     }
 
     #[test]
-    fn the_shipped_default_does_not_validate() {
-        // A default that passes validation would send a new user's files
-        // somewhere arbitrary; it must force a deliberate choice.
-        assert!(Config::default().validate_remote().is_err());
+    fn rejects_an_empty_list() {
+        assert!(with_remotes(&[]).validate_remotes().is_err());
+        assert!(Config::default().validate_remotes().is_err());
+    }
+
+    #[test]
+    fn a_legacy_single_remote_becomes_a_one_element_list() {
+        let mut cfg: Config =
+            toml::from_str("remote = \"gdrive:doclib\"\ncache_max_bytes = 0\n\n[openers]\n")
+                .unwrap();
+        cfg.absorb_legacy_remote();
+        assert_eq!(cfg.remotes, vec!["gdrive:doclib"]);
+    }
+
+    #[test]
+    fn an_explicit_list_wins_over_the_legacy_key() {
+        let mut cfg: Config = toml::from_str(
+            "remote = \"old:x\"\nremotes = [\"new:y\"]\ncache_max_bytes = 0\n\n[openers]\n",
+        )
+        .unwrap();
+        cfg.absorb_legacy_remote();
+        assert_eq!(cfg.remotes, vec!["new:y"]);
     }
 }

@@ -5,15 +5,15 @@ use std::process::Command;
 use crate::config::{self, Config};
 use crate::storage;
 
-pub fn run(cfg: &Config, remote: Option<&str>, show: bool, path_only: bool) -> Result<()> {
+pub fn run(cfg: &Config, remotes: &[String], show: bool, path_only: bool) -> Result<()> {
     let file = config::config_path()?;
 
     if path_only {
         println!("{}", file.display());
         return Ok(());
     }
-    if let Some(remote) = remote {
-        return set_remote(&file, remote);
+    if !remotes.is_empty() {
+        return set_remote(&file, remotes);
     }
     if show {
         return status(cfg);
@@ -28,42 +28,58 @@ pub fn run(cfg: &Config, remote: Option<&str>, show: bool, path_only: bool) -> R
 fn status(cfg: &Config) -> Result<()> {
     println!("config  {}", config::config_path()?.display());
     println!("data    {}", cfg.data_dir.display());
-    println!(
-        "remote  {}",
-        if cfg.remote.is_empty() {
-            "(unset)"
-        } else {
-            &cfg.remote
-        }
-    );
-    match cfg.validate_remote() {
-        Err(e) => println!("\n{e:#}"),
+    if cfg.remotes.is_empty() {
+        println!("remotes (none)");
+    } else {
+        println!("remotes");
+    }
+    for remote in &cfg.remotes {
         // Shape is only half the answer: ask rclone whether it resolves.
-        Ok(()) => match reachable(cfg) {
-            Ok(()) => println!("\nremote is reachable."),
-            Err(e) => println!("\n{e:#}"),
-        },
+        let state = match config::validate_remote(remote) {
+            Err(e) => format!("{e:#}")
+                .lines()
+                .next()
+                .unwrap_or("invalid")
+                .to_string(),
+            Ok(()) => match reachable(remote) {
+                Ok(()) => "reachable".to_string(),
+                Err(e) => format!("{e:#}")
+                    .lines()
+                    .next()
+                    .unwrap_or("unreachable")
+                    .to_string(),
+            },
+        };
+        println!("  {remote}  —  {state}");
+    }
+
+    if let Err(e) = cfg.validate_remotes() {
+        println!("\n{e:#}");
     }
     Ok(())
 }
 
-fn reachable(cfg: &Config) -> Result<()> {
+fn reachable(remote: &str) -> Result<()> {
     storage::check_available()?;
-    storage::check_remote(cfg)
+    storage::check_remote(remote)
 }
 
 /// Validate before writing, so a typo is rejected while the old value is still
 /// in place rather than after it has been overwritten.
-fn set_remote(file: &Path, remote: &str) -> Result<()> {
-    let candidate = Config {
-        remote: remote.to_string(),
-        ..Default::default()
-    };
-    candidate.validate_remote()?;
+fn set_remote(file: &Path, remotes: &[String]) -> Result<()> {
+    for remote in remotes {
+        config::validate_remote(remote)?;
+    }
 
     let text =
         std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
-    let quoted = toml::Value::String(remote.to_string()).to_string();
+    let quoted = toml::Value::Array(
+        remotes
+            .iter()
+            .map(|r| toml::Value::String(r.clone()))
+            .collect(),
+    )
+    .to_string();
 
     // Rewrite the one line in place: serializing the whole document back would
     // discard the explanatory comments and anything the user added.
@@ -71,29 +87,27 @@ fn set_remote(file: &Path, remote: &str) -> Result<()> {
     let mut out: Vec<String> = Vec::new();
     for line in text.lines() {
         if !replaced && is_remote_assignment(line) {
-            out.push(format!("remote = {quoted}"));
+            out.push(format!("remotes = {quoted}"));
             replaced = true;
         } else {
             out.push(line.to_string());
         }
     }
     if !replaced {
-        out.push(format!("remote = {quoted}"));
+        out.push(format!("remotes = {quoted}"));
     }
 
     std::fs::write(file, format!("{}\n", out.join("\n")))
         .with_context(|| format!("writing {}", file.display()))?;
 
-    println!("remote = {remote}");
+    println!("remotes = {quoted}");
 
     // A warning, not a failure: configuring doclib before `rclone config` is a
     // reasonable order to do things in.
-    let candidate = Config {
-        remote: remote.to_string(),
-        ..Default::default()
-    };
-    if let Err(e) = reachable(&candidate) {
-        eprintln!("\nwarning: {e:#}");
+    for remote in remotes {
+        if let Err(e) = reachable(remote) {
+            eprintln!("\nwarning: {e:#}");
+        }
     }
     Ok(())
 }
@@ -105,10 +119,16 @@ fn is_remote_assignment(line: &str) -> bool {
     if trimmed.starts_with('#') {
         return false;
     }
-    match trimmed.strip_prefix("remote") {
-        Some(rest) => rest.trim_start().starts_with('='),
-        None => false,
+    // Both the current `remotes` key and the legacy `remote` one, so setting a
+    // value replaces whichever the file happens to use.
+    for key in ["remotes", "remote"] {
+        if let Some(rest) = trimmed.strip_prefix(key)
+            && rest.trim_start().starts_with('=')
+        {
+            return true;
+        }
     }
+    false
 }
 
 fn edit(file: &Path) -> Result<()> {
@@ -147,6 +167,7 @@ mod tests {
 
     #[test]
     fn recognises_a_real_assignment() {
+        assert!(is_remote_assignment("remotes = [\"gdrive:doclib\"]"));
         assert!(is_remote_assignment("remote = \"gdrive:doclib\""));
         assert!(is_remote_assignment("remote=\"x\""));
         assert!(is_remote_assignment("  remote  =  \"x\""));
