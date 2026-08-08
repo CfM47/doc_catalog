@@ -7,6 +7,13 @@ use std::process::{Command, Stdio};
 
 use crate::config::Config;
 
+/// Verify both halves of the setup before any work begins: the binary is
+/// installed, and the configured remote means what the user thinks it means.
+pub fn check_ready(cfg: &Config) -> Result<()> {
+    check_available()?;
+    cfg.validate_remote()
+}
+
 /// Fail loudly at startup rather than halfway through a 400-file import.
 pub fn check_available() -> Result<()> {
     let status = Command::new("rclone")

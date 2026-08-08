@@ -52,7 +52,7 @@ pub fn run(
     // Purge first: if it fails, the catalog entry survives and still points at
     // the file, so nothing is orphaned.
     if purge {
-        storage::check_available()?;
+        storage::check_ready(cfg)?;
         storage::delete(cfg, &doc.remote_path)?;
         db::forget_tombstone(conn, &doc.content_hash)?;
         println!("deleted from {}", cfg.remote);

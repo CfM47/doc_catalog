@@ -22,7 +22,7 @@ pub fn run(
     auto: bool,
     forced_kind: Option<Kind>,
 ) -> Result<()> {
-    storage::check_available()?;
+    storage::check_ready(cfg)?;
 
     let files = collect(path);
     if files.is_empty() {

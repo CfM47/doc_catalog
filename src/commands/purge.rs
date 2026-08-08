@@ -12,7 +12,7 @@ use crate::ui;
 /// `doclib delete` without `--purge`, and from imports that failed after the
 /// upload but before the database write.
 pub fn run(conn: &Connection, cfg: &Config, assume_yes: bool) -> Result<()> {
-    storage::check_available()?;
+    storage::check_ready(cfg)?;
 
     let stored = storage::list(cfg)?;
     if stored.is_empty() {

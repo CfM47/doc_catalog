@@ -153,7 +153,20 @@ fn main() -> Result<()> {
             CacheAction::Prune { max } => commands::cache_cmd::prune(&conn, &cfg, *max),
         },
         Command::Config => {
-            println!("{}", config::config_path()?.display());
+            println!("config  {}", config::config_path()?.display());
+            println!("data    {}", cfg.data_dir.display());
+            println!(
+                "remote  {}",
+                if cfg.remote.is_empty() {
+                    "(unset)"
+                } else {
+                    &cfg.remote
+                }
+            );
+            match cfg.validate_remote() {
+                Ok(()) => println!("\nremote looks usable."),
+                Err(e) => println!("\n{e:#}"),
+            }
             Ok(())
         }
     }

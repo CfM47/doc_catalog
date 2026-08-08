@@ -10,7 +10,7 @@ use crate::storage;
 /// cache when it does not. Documents that are neither remote nor cached are
 /// reported, not silently ignored.
 pub fn run(conn: &Connection, cfg: &Config) -> Result<()> {
-    storage::check_available()?;
+    storage::check_ready(cfg)?;
 
     let docs = db::all(conn)?;
     let mut uploaded = 0;

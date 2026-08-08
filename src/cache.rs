@@ -40,6 +40,7 @@ pub fn ensure_cached(conn: &Connection, cfg: &Config, doc: &Document) -> Result<
     if path.exists() {
         return Ok(path);
     }
+    crate::storage::check_ready(cfg)?;
     println!("fetching {} from {}...", doc.title, cfg.remote);
     crate::storage::download(cfg, &doc.remote_path, &path)?;
     db::mark_cached(conn, &doc.id, Some(&crate::now()))?;
