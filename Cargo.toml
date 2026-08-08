@@ -2,6 +2,14 @@
 name = "doclib"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
+description = "Tag-indexed CLI catalog for books and articles, with rclone-backed storage"
+authors = ["Jossué Arteche Muñoz"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/CfM47/doc_catalog"
+keywords = ["cli", "books", "library", "catalog", "ebook"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 anyhow = "1.0.104"
