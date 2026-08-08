@@ -13,7 +13,7 @@
 
 [![crates.io](https://img.shields.io/crates/v/doclib.svg)](https://crates.io/crates/doclib)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
+[![rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 
 </div>
 
@@ -65,7 +65,7 @@ cargo install --git https://github.com/CfM47/doc_catalog
 
 ### Requirements
 
-- Rust 1.85+ (2024 edition)
+- Rust 1.88+ (2024 edition)
 - [rclone](https://rclone.org/install/) on `PATH`, with a remote configured
 
 ```sh

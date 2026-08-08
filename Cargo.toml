@@ -2,7 +2,7 @@
 name = "doclib"
 version = "0.1.1"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "Tag-indexed CLI catalog for books and articles, with rclone-backed storage"
 authors = ["Jossué Arteche Muñoz"]
 license = "MIT"

@@ -121,6 +121,15 @@ enum Command {
         #[arg(short = 'y', long = "yes")]
         assume_yes: bool,
     },
+    /// Permanently delete the whole library
+    Destroy {
+        /// Also delete the stored files from the remote
+        #[arg(long)]
+        remote: bool,
+        /// Skip the typed confirmation
+        #[arg(short = 'y', long = "yes")]
+        assume_yes: bool,
+    },
     /// Inspect or prune the local cache
     Cache {
         #[command(subcommand)]
@@ -190,6 +199,9 @@ fn main() -> Result<()> {
         Command::Stats => commands::stats::run(&conn, &cfg),
         Command::Sync => commands::sync::run(&conn, &cfg),
         Command::Purge { assume_yes } => commands::purge::run(&conn, &cfg, *assume_yes),
+        Command::Destroy { remote, assume_yes } => {
+            commands::destroy::run(conn, &cfg, *remote, *assume_yes)
+        }
         Command::Cache { action } => match action {
             CacheAction::Status => commands::cache_cmd::status(&cfg),
             CacheAction::Prune { max } => commands::cache_cmd::prune(&conn, &cfg, *max),
