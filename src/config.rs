@@ -32,9 +32,7 @@ impl Default for Config {
         let mut openers = BTreeMap::new();
         openers.insert("pdf".to_string(), "okular".to_string());
         Config {
-            // Deliberately empty. Any guess here would be wrong for most
-            // people, and a plausible-looking default is worse than none.
-            stores: Vec::new(),
+            stores: vec![default_store()],
             remotes: Vec::new(),
             remote: None,
             cache_max_bytes: 20 * 1024 * 1024 * 1024,
@@ -87,9 +85,28 @@ pub fn ensure_file() -> Result<PathBuf> {
     if !config_file.exists() {
         fs::write(&config_file, Config::default().to_toml()?)?;
         eprintln!("wrote default config to {}", config_file.display());
-        eprintln!("set `stores` before importing — see the comments in that file.");
+        eprintln!("storing documents in {}", default_store().display());
     }
     Ok(config_file)
+}
+
+/// Overwrite the config with the defaults, keeping the previous file as
+/// `config.toml.bak` so a reset is never a one-way door.
+pub fn reset_file() -> Result<(PathBuf, Option<PathBuf>)> {
+    let config_file = ensure_file()?;
+    let backup = config_file.with_extension("toml.bak");
+
+    let saved = if config_file.exists() {
+        fs::copy(&config_file, &backup)
+            .with_context(|| format!("backing up {}", config_file.display()))?;
+        Some(backup)
+    } else {
+        None
+    };
+
+    fs::write(&config_file, Config::default().to_toml()?)
+        .with_context(|| format!("writing {}", config_file.display()))?;
+    Ok((config_file, saved))
 }
 
 impl Config {
@@ -121,7 +138,12 @@ impl Config {
         let legacy: Vec<String> = self
             .remotes
             .drain(..)
-            .chain(self.remote.take().map(OneOrMany::into_vec).unwrap_or_default())
+            .chain(
+                self.remote
+                    .take()
+                    .map(OneOrMany::into_vec)
+                    .unwrap_or_default(),
+            )
             .filter(|value| !value.trim().is_empty())
             .collect();
         self.stores = legacy.into_iter().map(PathBuf::from).collect();
@@ -166,6 +188,13 @@ impl Config {
     pub fn stored_path(&self, hash: &str, ext: &str) -> String {
         format!("{}/{}.{}", &hash[..2], hash, ext)
     }
+}
+
+/// Where a library lives unless told otherwise. Safe to default to: it is an
+/// absolute path under the user's own home, so nothing can be written
+/// somewhere surprising.
+pub fn default_store() -> PathBuf {
+    expand_home(Path::new("~/doclib"))
 }
 
 /// `~/library` is what people type; it is not a path the OS understands.
@@ -221,9 +250,9 @@ const CONFIG_HEADER: &str = r#"# doclib configuration
 #   on an external drive, on a network share the system has already mounted.
 #   Paths must be absolute; ~ is expanded.
 #
-#     stores = ["/home/you/library"]
-#     stores = ["/home/you/library", "/mnt/usb/library"]
-#     stores = ["~/library", "/run/media/you/BACKUP/library"]
+#     stores = ["~/doclib"]                       the default
+#     stores = ["~/doclib", "/mnt/usb/library"]   a copy on a USB disk too
+#     stores = ["/run/media/you/BACKUP/library"]
 #
 #   Each store holds a .doclib-store marker file. That is how an unmounted
 #   disk is told apart from an empty folder: without the marker doclib will
@@ -292,7 +321,17 @@ mod tests {
     #[test]
     fn rejects_an_empty_list() {
         assert!(with_stores(&[]).validate_stores().is_err());
-        assert!(Config::default().validate_stores().is_err());
+    }
+
+    #[test]
+    fn the_default_store_is_usable_without_being_edited() {
+        // Unlike the rclone version, a default is safe here: it is an absolute
+        // path in the user's own home, not a guess at someone's cloud account.
+        let cfg = Config::default();
+        assert_eq!(cfg.stores, vec![default_store()]);
+        assert!(cfg.validate_stores().is_ok());
+        assert!(default_store().is_absolute());
+        assert!(default_store().ends_with("doclib"));
     }
 
     #[test]

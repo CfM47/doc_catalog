@@ -152,6 +152,9 @@ enum Command {
         /// Print only the config file path, for scripting
         #[arg(long)]
         path: bool,
+        /// Replace the config with the defaults, keeping the old one as .bak
+        #[arg(long)]
+        reset: bool,
     },
 }
 
@@ -179,6 +182,19 @@ fn parse_kind(value: &Option<String>) -> Result<Option<Kind>> {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    // The config command runs before the config is read: a file that fails to
+    // parse must not disable the only command that can repair it.
+    if let Command::Config {
+        stores,
+        show,
+        path,
+        reset,
+    } = &cli.command
+    {
+        return commands::config_cmd::run(stores, *show, *path, *reset);
+    }
+
     let cfg = Config::load()?;
     let conn = db::open(&cfg.db_path())?;
 
@@ -213,8 +229,7 @@ fn main() -> Result<()> {
             CacheAction::Status => commands::cache_cmd::status(&cfg),
             CacheAction::Prune { max } => commands::cache_cmd::prune(&conn, &cfg, *max),
         },
-        Command::Config { stores, show, path } => {
-            commands::config_cmd::run(&cfg, stores, *show, *path)
-        }
+        // Handled above, before the config was loaded.
+        Command::Config { .. } => unreachable!(),
     }
 }

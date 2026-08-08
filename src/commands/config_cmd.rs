@@ -5,29 +5,61 @@ use std::process::Command;
 use crate::config::{self, Config};
 use crate::storage;
 
-pub fn run(cfg: &Config, stores: &[PathBuf], show: bool, path_only: bool) -> Result<()> {
-    let file = config::config_path()?;
+/// Deliberately loads the config itself rather than being handed one: a
+/// config that fails to parse must not stop the command that repairs it.
+pub fn run(stores: &[PathBuf], show: bool, path_only: bool, reset: bool) -> Result<()> {
+    let file = config::ensure_file()?;
 
     if path_only {
         println!("{}", file.display());
         return Ok(());
     }
+    if reset {
+        return reset_config();
+    }
     if !stores.is_empty() {
         return set_stores(&file, stores);
     }
     if show {
-        return status(cfg);
+        return status();
     }
 
     edit(&file)?;
-    // Re-read rather than trusting the in-memory copy: the point of opening an
-    // editor is that the file on disk changed.
-    status(&Config::load()?)
+    // Re-read rather than trusting anything held in memory: the point of
+    // opening an editor is that the file on disk changed.
+    status()
 }
 
-fn status(cfg: &Config) -> Result<()> {
+fn reset_config() -> Result<()> {
+    let (file, backup) = config::reset_file()?;
+    println!("reset {}", file.display());
+    if let Some(backup) = backup {
+        println!("previous config kept at {}", backup.display());
+    }
+
+    let store = config::default_store();
+    match storage::init_store(&store) {
+        Ok(()) => println!("store {} ready", store.display()),
+        Err(e) => eprintln!("warning: {e:#}"),
+    }
+    Ok(())
+}
+
+fn status() -> Result<()> {
     println!("config  {}", config::config_path()?.display());
-    println!("data    {}", cfg.data_dir.display());
+    println!("data    {}", config::data_dir()?.display());
+
+    let cfg = match Config::load() {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            // The file is unreadable, so there is nothing to report about it
+            // beyond why, and how to get back to something that works.
+            println!("\n{e:#}");
+            println!("\nfix it with `doclib config`, or start over with `doclib config --reset`.");
+            return Ok(());
+        }
+    };
+
     if cfg.stores.is_empty() {
         println!("stores  (none)");
     } else {
