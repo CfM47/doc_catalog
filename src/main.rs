@@ -15,11 +15,26 @@ use std::path::PathBuf;
 use config::Config;
 use model::Kind;
 
+const BANNER: &str = r#"
+    ██████╗  ██████╗  ██████╗██╗     ██╗██████╗     ( (
+    ██╔══██╗██╔═══██╗██╔════╝██║     ██║██╔══██╗      ) )
+    ██║  ██║██║   ██║██║     ██║     ██║██████╔╝   ********
+    ██║  ██║██║   ██║██║     ██║     ██║██╔══██╗   ████████▀▌
+    ██████╔╝╚██████╔╝╚██████╗███████╗██║██████╔╝   ▀██████▀▀
+    ╚═════╝  ╚═════╝  ╚═════╝╚══════╝╚═╝╚═════╝     ▀▀▀▀▀▀
+
+               A blazingly-fast ⚡ memory-safe 💾
+Tag-indexed shelf for books 📚 and articles 📄, built in Rust 🦀
+                              - CfM47 2026 -
+
+"#;
+
 #[derive(Parser)]
 #[command(
     name = "doclib",
     version,
-    about = "Tag-indexed library for books and articles"
+    about = "Tag-indexed library for books and articles",
+    before_help = BANNER
 )]
 struct Cli {
     #[command(subcommand)]
