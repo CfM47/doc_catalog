@@ -86,6 +86,12 @@ enum Command {
     },
     /// Verify the remote holds every catalogued document
     Sync,
+    /// Delete stored files that no catalog entry points at
+    Purge {
+        /// Skip the confirmation prompt
+        #[arg(short = 'y', long = "yes")]
+        assume_yes: bool,
+    },
     /// Inspect or prune the local cache
     Cache {
         #[command(subcommand)]
@@ -141,6 +147,7 @@ fn main() -> Result<()> {
         Command::Tags => commands::list::tags(&conn),
         Command::Tag { query } => commands::tag::run(&conn, query),
         Command::Sync => commands::sync::run(&conn, &cfg),
+        Command::Purge { assume_yes } => commands::purge::run(&conn, &cfg, *assume_yes),
         Command::Cache { action } => match action {
             CacheAction::Status => commands::cache_cmd::status(&cfg),
             CacheAction::Prune { max } => commands::cache_cmd::prune(&conn, &cfg, *max),

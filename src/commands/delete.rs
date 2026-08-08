@@ -39,7 +39,7 @@ pub fn run(
         println!("  - the stored copy at {}/{}", cfg.remote, doc.remote_path);
     } else {
         println!(
-            "\nthe stored copy at {}/{} is kept. re-run with --purge to delete it too.",
+            "\nthe stored copy at {}/{} is kept, and `doclib purge` can delete it later.",
             cfg.remote, doc.remote_path
         );
     }
@@ -54,7 +54,12 @@ pub fn run(
     if purge {
         storage::check_available()?;
         storage::delete(cfg, &doc.remote_path)?;
+        db::forget_tombstone(conn, &doc.content_hash)?;
         println!("deleted from {}", cfg.remote);
+    } else {
+        // The file outlives the catalog entry, so remember what it was —
+        // otherwise `doclib purge` could only report it as a bare hash.
+        db::tombstone(conn, &doc)?;
     }
 
     if cached.exists() {

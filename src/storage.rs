@@ -66,6 +66,36 @@ pub fn download(cfg: &Config, remote_rel: &str, dest: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Every stored file, as (path relative to the remote root, size in bytes).
+pub fn list(cfg: &Config) -> Result<Vec<(String, u64)>> {
+    let root = cfg.remote.trim_end_matches('/').to_string();
+    let out = run(&[
+        "lsf",
+        "-R",
+        "--files-only",
+        "--format",
+        "ps",
+        "--separator",
+        "\t",
+        &root,
+    ])?;
+    if !out.status.success() {
+        bail!(
+            "rclone lsf {root} failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+
+    let text = String::from_utf8_lossy(&out.stdout);
+    Ok(text
+        .lines()
+        .filter_map(|line| {
+            let (path, size) = line.split_once('\t')?;
+            Some((path.to_string(), size.trim().parse().unwrap_or(0)))
+        })
+        .collect())
+}
+
 pub fn delete(cfg: &Config, remote_rel: &str) -> Result<()> {
     let target = remote_url(cfg, remote_rel);
     let out = run(&["deletefile", &target])?;

@@ -114,6 +114,8 @@ fn import_one(
     println!("done");
 
     db::insert(conn, &doc)?;
+    // These bytes are catalogued again, so any pending purge no longer applies.
+    db::forget_tombstone(conn, &hash)?;
 
     if !auto {
         let tags = ui::ask_tags(conn, &[], "  ")?;

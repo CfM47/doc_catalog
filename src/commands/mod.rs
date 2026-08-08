@@ -4,6 +4,7 @@ pub mod edit;
 pub mod import;
 pub mod list;
 pub mod open;
+pub mod purge;
 pub mod search;
 pub mod show;
 pub mod sync;

@@ -86,12 +86,83 @@ pub fn open(path: &std::path::Path) -> Result<Connection> {
     Ok(conn)
 }
 
+/// Records what a deleted document used to be, so its abandoned file can be
+/// named rather than shown as a bare hash when purging.
+const SCHEMA_V2: &str = r#"
+CREATE TABLE deleted_documents (
+    content_hash TEXT PRIMARY KEY,
+    title        TEXT NOT NULL,
+    authors      TEXT,
+    ext          TEXT NOT NULL,
+    size         INTEGER NOT NULL,
+    remote_path  TEXT NOT NULL,
+    deleted_at   TEXT NOT NULL
+);
+"#;
+
 fn migrate(conn: &Connection) -> Result<()> {
     let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
     if version < 1 {
         conn.execute_batch(SCHEMA)?;
         conn.pragma_update(None, "user_version", 1)?;
     }
+    if version < 2 {
+        conn.execute_batch(SCHEMA_V2)?;
+        conn.pragma_update(None, "user_version", 2)?;
+    }
+    Ok(())
+}
+
+/// A file left on the remote after its catalog entry was deleted.
+#[derive(Debug, Clone)]
+pub struct Tombstone {
+    pub content_hash: String,
+    pub title: String,
+    pub authors: Option<String>,
+    pub remote_path: String,
+    pub deleted_at: String,
+}
+
+pub fn tombstone(conn: &Connection, doc: &Document) -> Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO deleted_documents
+            (content_hash, title, authors, ext, size, remote_path, deleted_at)
+         VALUES (?1,?2,?3,?4,?5,?6,?7)",
+        params![
+            doc.content_hash,
+            doc.title,
+            doc.authors,
+            doc.ext,
+            doc.size,
+            doc.remote_path,
+            crate::now(),
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn tombstones(conn: &Connection) -> Result<Vec<Tombstone>> {
+    let mut stmt = conn.prepare(
+        "SELECT content_hash, title, authors, remote_path, deleted_at \
+         FROM deleted_documents ORDER BY deleted_at",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(Tombstone {
+            content_hash: row.get(0)?,
+            title: row.get(1)?,
+            authors: row.get(2)?,
+            remote_path: row.get(3)?,
+            deleted_at: row.get(4)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+pub fn forget_tombstone(conn: &Connection, hash: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM deleted_documents WHERE content_hash = ?1",
+        params![hash],
+    )?;
     Ok(())
 }
 
