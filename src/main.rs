@@ -113,9 +113,9 @@ enum Command {
     },
     /// Summarise the catalog and show where metadata is missing
     Stats,
-    /// Verify every remote holds every catalogued document
+    /// Verify every store holds every catalogued document
     Sync,
-    /// Copy files between remotes until they all hold the same set
+    /// Copy files between stores until they all hold the same set
     Update {
         /// Show what would be copied without copying anything
         #[arg(long)]
@@ -129,9 +129,9 @@ enum Command {
     },
     /// Permanently delete the whole library
     Destroy {
-        /// Also delete the stored files from the remote
+        /// Also delete the files from every store
         #[arg(long)]
-        remote: bool,
+        stores: bool,
         /// Skip the typed confirmation
         #[arg(short = 'y', long = "yes")]
         assume_yes: bool,
@@ -143,9 +143,9 @@ enum Command {
     },
     /// Open the config in $EDITOR, or change one setting directly
     Config {
-        /// Set the storage remotes and exit, without opening an editor
-        #[arg(long = "remote", value_name = "REMOTE", num_args = 1..)]
-        remotes: Vec<String>,
+        /// Set the store folders and exit, without opening an editor
+        #[arg(long = "store", value_name = "PATH", num_args = 1..)]
+        stores: Vec<PathBuf>,
         /// Print the current settings instead of editing
         #[arg(long)]
         show: bool,
@@ -206,17 +206,15 @@ fn main() -> Result<()> {
         Command::Sync => commands::sync::run(&conn, &cfg),
         Command::Update { dry_run } => commands::update::run(&conn, &cfg, *dry_run),
         Command::Purge { assume_yes } => commands::purge::run(&conn, &cfg, *assume_yes),
-        Command::Destroy { remote, assume_yes } => {
-            commands::destroy::run(conn, &cfg, *remote, *assume_yes)
+        Command::Destroy { stores, assume_yes } => {
+            commands::destroy::run(conn, &cfg, *stores, *assume_yes)
         }
         Command::Cache { action } => match action {
             CacheAction::Status => commands::cache_cmd::status(&cfg),
             CacheAction::Prune { max } => commands::cache_cmd::prune(&conn, &cfg, *max),
         },
-        Command::Config {
-            remotes,
-            show,
-            path,
-        } => commands::config_cmd::run(&cfg, remotes, *show, *path),
+        Command::Config { stores, show, path } => {
+            commands::config_cmd::run(&cfg, stores, *show, *path)
+        }
     }
 }

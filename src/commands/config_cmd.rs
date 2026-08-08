@@ -1,19 +1,19 @@
 use anyhow::{Context, Result, bail};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::config::{self, Config};
 use crate::storage;
 
-pub fn run(cfg: &Config, remotes: &[String], show: bool, path_only: bool) -> Result<()> {
+pub fn run(cfg: &Config, stores: &[PathBuf], show: bool, path_only: bool) -> Result<()> {
     let file = config::config_path()?;
 
     if path_only {
         println!("{}", file.display());
         return Ok(());
     }
-    if !remotes.is_empty() {
-        return set_remote(&file, remotes);
+    if !stores.is_empty() {
+        return set_stores(&file, stores);
     }
     if show {
         return status(cfg);
@@ -28,55 +28,55 @@ pub fn run(cfg: &Config, remotes: &[String], show: bool, path_only: bool) -> Res
 fn status(cfg: &Config) -> Result<()> {
     println!("config  {}", config::config_path()?.display());
     println!("data    {}", cfg.data_dir.display());
-    if cfg.remotes.is_empty() {
-        println!("remotes (none)");
+    if cfg.stores.is_empty() {
+        println!("stores  (none)");
     } else {
-        println!("remotes");
+        println!("stores");
     }
-    for remote in &cfg.remotes {
-        // Shape is only half the answer: ask rclone whether it resolves.
-        let state = match config::validate_remote(remote) {
-            Err(e) => format!("{e:#}")
-                .lines()
-                .next()
-                .unwrap_or("invalid")
-                .to_string(),
-            Ok(()) => match reachable(remote) {
-                Ok(()) => "reachable".to_string(),
-                Err(e) => format!("{e:#}")
-                    .lines()
-                    .next()
-                    .unwrap_or("unreachable")
-                    .to_string(),
+    for store in &cfg.stores {
+        // Being a valid path is only half the answer: the disk also has to be
+        // there, carrying the marker that says it really is our store.
+        let state = match config::validate_store(store) {
+            Err(e) => first_line(&e),
+            Ok(()) => match storage::check_store(store) {
+                Ok(()) => "available".to_string(),
+                Err(e) => first_line(&e),
             },
         };
-        println!("  {remote}  —  {state}");
+        println!("  {}  —  {state}", store.display());
     }
 
-    if let Err(e) = cfg.validate_remotes() {
-        println!("\n{e:#}");
+    if let Err(e) = cfg.validate_stores() {
+        println!(
+            "
+{e:#}"
+        );
     }
     Ok(())
 }
 
-fn reachable(remote: &str) -> Result<()> {
-    storage::check_available()?;
-    storage::check_remote(remote)
+fn first_line(error: &anyhow::Error) -> String {
+    format!("{error:#}")
+        .lines()
+        .next()
+        .unwrap_or("unavailable")
+        .to_string()
 }
 
 /// Validate before writing, so a typo is rejected while the old value is still
 /// in place rather than after it has been overwritten.
-fn set_remote(file: &Path, remotes: &[String]) -> Result<()> {
-    for remote in remotes {
-        config::validate_remote(remote)?;
+fn set_stores(file: &Path, stores: &[PathBuf]) -> Result<()> {
+    let stores: Vec<PathBuf> = stores.iter().map(|s| config::expand_home(s)).collect();
+    for store in &stores {
+        config::validate_store(store)?;
     }
 
     let text =
         std::fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
     let quoted = toml::Value::Array(
-        remotes
+        stores
             .iter()
-            .map(|r| toml::Value::String(r.clone()))
+            .map(|s| toml::Value::String(s.display().to_string()))
             .collect(),
     )
     .to_string();
@@ -87,26 +87,28 @@ fn set_remote(file: &Path, remotes: &[String]) -> Result<()> {
     let mut out: Vec<String> = Vec::new();
     for line in text.lines() {
         if !replaced && is_remote_assignment(line) {
-            out.push(format!("remotes = {quoted}"));
+            out.push(format!("stores = {quoted}"));
             replaced = true;
         } else {
             out.push(line.to_string());
         }
     }
     if !replaced {
-        out.push(format!("remotes = {quoted}"));
+        out.push(format!("stores = {quoted}"));
     }
 
     std::fs::write(file, format!("{}\n", out.join("\n")))
         .with_context(|| format!("writing {}", file.display()))?;
 
-    println!("remotes = {quoted}");
+    println!("stores = {quoted}");
 
-    // A warning, not a failure: configuring doclib before `rclone config` is a
-    // reasonable order to do things in.
-    for remote in remotes {
-        if let Err(e) = reachable(remote) {
-            eprintln!("\nwarning: {e:#}");
+    // Create each store now so the marker exists and the folder is usable. A
+    // disconnected disk is a warning, not a failure — configuring it before
+    // plugging it in is a reasonable order to do things in.
+    for store in &stores {
+        match storage::init_store(store) {
+            Ok(()) => println!("  {} ready", store.display()),
+            Err(e) => eprintln!("  warning: {e:#}"),
         }
     }
     Ok(())
@@ -121,7 +123,7 @@ fn is_remote_assignment(line: &str) -> bool {
     }
     // Both the current `remotes` key and the legacy `remote` one, so setting a
     // value replaces whichever the file happens to use.
-    for key in ["remotes", "remote"] {
+    for key in ["stores", "remotes", "remote"] {
         if let Some(rest) = trimmed.strip_prefix(key)
             && rest.trim_start().starts_with('=')
         {
@@ -167,6 +169,7 @@ mod tests {
 
     #[test]
     fn recognises_a_real_assignment() {
+        assert!(is_remote_assignment("stores = [\"/home/you/library\"]"));
         assert!(is_remote_assignment("remotes = [\"gdrive:doclib\"]"));
         assert!(is_remote_assignment("remote = \"gdrive:doclib\""));
         assert!(is_remote_assignment("remote=\"x\""));

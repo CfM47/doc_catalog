@@ -55,10 +55,10 @@ pub fn run(conn: &Connection, cfg: &Config, query: &str) -> Result<()> {
             "no (fetched on open)".to_string()
         }),
     );
-    for (index, remote) in cfg.remotes.iter().enumerate() {
+    for (index, store) in cfg.stores.iter().enumerate() {
         out.add_owned(
-            if index == 0 { "remote" } else { "" },
-            Some(format!("{remote}/{}", doc.remote_path)),
+            if index == 0 { "stored" } else { "" },
+            Some(format!("{}/{}", store.display(), doc.remote_path)),
         );
     }
     out.add("added", Some(&doc.added_at));

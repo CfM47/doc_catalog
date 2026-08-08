@@ -3,17 +3,20 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
-    /// Every remote the library is replicated to. Order is read preference.
+    /// Every folder the library is stored in. Order is read preference.
     #[serde(default)]
-    pub remotes: Vec<String>,
+    pub stores: Vec<PathBuf>,
 
-    /// Superseded by `remotes`, still read so older configs keep working.
+    /// Superseded by `stores`. Kept so configs written against the rclone
+    /// version keep loading, though rclone remotes are no longer supported.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    remotes: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    remote: Option<String>,
+    remote: Option<OneOrMany>,
 
     /// Cache eviction ceiling in bytes. 0 disables pruning.
     pub cache_max_bytes: u64,
@@ -30,13 +33,31 @@ impl Default for Config {
         openers.insert("pdf".to_string(), "okular".to_string());
         Config {
             // Deliberately empty. Any guess here would be wrong for most
-            // people, and a wrong-looking value that happens to parse is worse
-            // than none: `remotes = ["books"]` silently uploads to ./books.
+            // people, and a plausible-looking default is worse than none.
+            stores: Vec::new(),
             remotes: Vec::new(),
             remote: None,
             cache_max_bytes: 20 * 1024 * 1024 * 1024,
             openers,
             data_dir: PathBuf::new(),
+        }
+    }
+}
+
+/// `remote` was a single string, but people reasonably write a list once they
+/// learn about several stores. Accept either rather than failing to parse.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+enum OneOrMany {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl OneOrMany {
+    fn into_vec(self) -> Vec<String> {
+        match self {
+            OneOrMany::One(value) => vec![value],
+            OneOrMany::Many(values) => values,
         }
     }
 }
@@ -49,41 +70,61 @@ pub fn config_path() -> Result<PathBuf> {
     Ok(project_dirs()?.config_dir().join("config.toml"))
 }
 
+pub fn data_dir() -> Result<PathBuf> {
+    let dir = project_dirs()?.data_dir().to_path_buf();
+    fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+/// Create the config directory and, on first run, a commented default file.
+/// Deliberately does no parsing: `doclib config` has to be usable against a
+/// file that does not parse, since that is how the file gets fixed.
+pub fn ensure_file() -> Result<PathBuf> {
+    let dirs = project_dirs()?;
+    let config_file = dirs.config_dir().join("config.toml");
+    fs::create_dir_all(dirs.config_dir())?;
+
+    if !config_file.exists() {
+        fs::write(&config_file, Config::default().to_toml()?)?;
+        eprintln!("wrote default config to {}", config_file.display());
+        eprintln!("set `stores` before importing — see the comments in that file.");
+    }
+    Ok(config_file)
+}
+
 impl Config {
     /// Read config, writing a commented default on first run.
     pub fn load() -> Result<Config> {
-        let dirs = project_dirs()?;
-        let config_file = dirs.config_dir().join("config.toml");
-        let data_dir = dirs.data_dir().to_path_buf();
-
-        fs::create_dir_all(dirs.config_dir())?;
-        fs::create_dir_all(&data_dir)?;
-
-        if !config_file.exists() {
-            let default = Config::default();
-            fs::write(&config_file, default.to_toml()?)?;
-            eprintln!("wrote default config to {}", config_file.display());
-            eprintln!("set `remotes` before importing — see the comments in that file.");
-        }
+        let config_file = ensure_file()?;
+        let data_dir = data_dir()?;
 
         let text = fs::read_to_string(&config_file)
             .with_context(|| format!("reading {}", config_file.display()))?;
         let mut cfg: Config =
             toml::from_str(&text).with_context(|| format!("parsing {}", config_file.display()))?;
         cfg.data_dir = data_dir;
-        cfg.absorb_legacy_remote();
+        cfg.absorb_legacy_keys();
+        cfg.stores = cfg.stores.iter().map(|s| expand_home(s)).collect();
         Ok(cfg)
     }
 
-    /// A config written before multi-remote support has `remote = "..."`.
-    /// Treat it as a one-element list rather than making the user edit.
-    fn absorb_legacy_remote(&mut self) {
-        if let Some(legacy) = self.remote.take()
-            && self.remotes.is_empty()
-            && !legacy.trim().is_empty()
-        {
-            self.remotes.push(legacy);
+    /// Configs written against the rclone version used `remotes` / `remote`.
+    /// Carry those entries over as-is; anything of the form `name:path` was an
+    /// rclone remote and is reported by `validate_stores` rather than silently
+    /// dropped, so nobody loses a library to a quiet migration.
+    fn absorb_legacy_keys(&mut self) {
+        if !self.stores.is_empty() {
+            self.remotes.clear();
+            self.remote = None;
+            return;
         }
+        let legacy: Vec<String> = self
+            .remotes
+            .drain(..)
+            .chain(self.remote.take().map(OneOrMany::into_vec).unwrap_or_default())
+            .filter(|value| !value.trim().is_empty())
+            .collect();
+        self.stores = legacy.into_iter().map(PathBuf::from).collect();
     }
 
     fn to_toml(&self) -> Result<String> {
@@ -91,17 +132,17 @@ impl Config {
         Ok(format!("{CONFIG_HEADER}\n{body}"))
     }
 
-    pub fn validate_remotes(&self) -> Result<()> {
-        if self.remotes.is_empty() {
+    pub fn validate_stores(&self) -> Result<()> {
+        if self.stores.is_empty() {
             bail!(
-                "no remotes configured.\n\
-                 set `remotes` in {}\n\
-                 list your configured rclone remotes with `rclone listremotes`.",
+                "no stores configured.\n\
+                 set `stores` in {}\n\
+                 for example: stores = [\"/home/you/library\", \"/mnt/usb/library\"]",
                 config_path()?.display()
             );
         }
-        for remote in &self.remotes {
-            validate_remote(remote)?;
+        for store in &self.stores {
+            validate_store(store)?;
         }
         Ok(())
     }
@@ -121,65 +162,77 @@ impl Config {
             .join(format!("{hash}.{ext}"))
     }
 
-    /// The same on every remote, since it is derived from the content hash.
-    pub fn remote_path(&self, hash: &str, ext: &str) -> String {
+    /// The same in every store, since it is derived from the content hash.
+    pub fn stored_path(&self, hash: &str, ext: &str) -> String {
         format!("{}/{}.{}", &hash[..2], hash, ext)
     }
 }
 
-/// Reject a remote that rclone would accept but that does not mean what the
-/// user thinks. Anything without a colon is a local filesystem path, and a
-/// relative one resolves against the current directory — so the same command
-/// run from two shells would use two different stores.
-pub fn validate_remote(remote: &str) -> Result<()> {
-    let remote = remote.trim();
+/// `~/library` is what people type; it is not a path the OS understands.
+pub fn expand_home(path: &Path) -> PathBuf {
+    let Ok(rest) = path.strip_prefix("~") else {
+        return path.to_path_buf();
+    };
+    match std::env::var_os("HOME") {
+        Some(home) => PathBuf::from(home).join(rest),
+        None => path.to_path_buf(),
+    }
+}
 
-    if remote.is_empty() {
-        bail!("empty remote in `remotes`");
+/// A store must be an absolute path. A relative one resolves against the
+/// current directory, so the same command run from two shells would use two
+/// different libraries.
+pub fn validate_store(store: &Path) -> Result<()> {
+    let text = store.to_string_lossy();
+
+    if text.trim().is_empty() {
+        bail!("empty path in `stores`");
     }
 
-    // ":s3:bucket" and friends are rclone connection strings: a full backend
-    // definition inline, no configured remote needed.
-    if remote.starts_with(':') || remote.starts_with('/') {
-        return Ok(());
+    // Configs carried over from the rclone version may still hold "gdrive:lib".
+    if let Some((name, _)) = text.split_once(':')
+        && !name.contains('/')
+    {
+        bail!(
+            "{text:?} looks like an rclone remote, which doclib no longer uses.\n\
+             stores are plain folders now — mount the disk and use its path, \
+             for example \"/mnt/usb/library\"."
+        );
     }
 
-    // A colon before the first slash means "configured remote".
-    let head = remote.split('/').next().unwrap_or(remote);
-    if head.contains(':') {
-        return Ok(());
+    if !store.is_absolute() {
+        bail!(
+            "store {text:?} is a relative path, so where files go depends on the \
+             directory you run doclib from.\n\
+             use an absolute path, for example \"/home/you/library\"."
+        );
     }
-
-    bail!(
-        "remote {remote:?} is a relative local path, so where files go depends on \
-         the directory you run doclib from.\n\
-         use a configured rclone remote (\"{remote}:doclib\", if that is the remote's \
-         name) or an absolute path (\"/home/you/{remote}\")."
-    );
+    Ok(())
 }
 
 const CONFIG_HEADER: &str = r#"# doclib configuration
 #
-# remotes
-#   Every place the library is stored, in rclone's own syntax. Documents are
-#   uploaded to all of them; `doclib update` copies whatever is missing between
-#   them so they converge. The first is tried first when reading.
+# stores
+#   Every folder the library is kept in. Documents are copied into all of
+#   them; `doclib update` copies whatever is missing between them so they
+#   converge. The first is tried first when reading.
 #
-#   Run `rclone listremotes` to see what you have configured, and
-#   `rclone config` to add one. Any backend rclone supports works:
+#   A store is an ordinary directory — on this disk, on a mounted USB stick,
+#   on an external drive, on a network share the system has already mounted.
+#   Paths must be absolute; ~ is expanded.
 #
-#     remotes = ["gdrive:doclib"]                   one configured remote
-#     remotes = ["gdrive:doclib", "/mnt/usb/lib"]   cloud plus a local disk
-#     remotes = ["b2:my-bucket/doclib"]             bucket storage with a path
-#     remotes = [":s3:my-bucket"]                   an inline connection string
+#     stores = ["/home/you/library"]
+#     stores = ["/home/you/library", "/mnt/usb/library"]
+#     stores = ["~/library", "/run/media/you/BACKUP/library"]
 #
-#   A bare name with no colon ("doclib") is NOT a remote — rclone reads it as a
-#   relative local directory, so the destination would follow your shell's
-#   working directory. doclib refuses that.
+#   Each store holds a .doclib-store marker file. That is how an unmounted
+#   disk is told apart from an empty folder: without the marker doclib will
+#   not write there, so a disconnected USB stick can never be mistaken for an
+#   empty library.
 #
 # cache_max_bytes
 #   Local cache ceiling. `doclib cache prune` evicts least-recently-opened
-#   files above it; they are re-fetched from a remote on the next open.
+#   files above it; they are copied back from a store on the next open.
 #   Set 0 to never evict.
 #
 # openers
@@ -191,84 +244,88 @@ const CONFIG_HEADER: &str = r#"# doclib configuration
 mod tests {
     use super::*;
 
-    fn with_remotes(remotes: &[&str]) -> Config {
+    fn with_stores(stores: &[&str]) -> Config {
         Config {
-            remotes: remotes.iter().map(|r| r.to_string()).collect(),
+            stores: stores.iter().map(PathBuf::from).collect(),
             ..Default::default()
         }
     }
 
     #[test]
-    fn accepts_every_shape_of_configured_remote() {
-        for remote in [
-            "gdrive:doclib",
-            "dropbox:books",
-            "b2:my-bucket/doclib",
-            "onedrive:",
-            ":s3:my-bucket/doclib",
-            "/mnt/usb/doclib",
-        ] {
+    fn accepts_absolute_paths() {
+        for store in ["/home/you/library", "/mnt/usb/library", "/"] {
             assert!(
-                validate_remote(remote).is_ok(),
-                "rejected valid remote {remote:?}"
+                validate_store(Path::new(store)).is_ok(),
+                "rejected valid store {store:?}"
             );
         }
     }
 
     #[test]
-    fn rejects_a_relative_path_masquerading_as_a_remote() {
-        // The trap: rclone accepts these, but resolves them against the
-        // working directory rather than any configured backend.
-        for remote in ["doclib", "books/doclib", "./doclib", "../shared"] {
+    fn rejects_a_relative_path() {
+        for store in ["library", "books/library", "./library", "../shared"] {
             assert!(
-                validate_remote(remote).is_err(),
-                "accepted relative path {remote:?}"
+                validate_store(Path::new(store)).is_err(),
+                "accepted relative path {store:?}"
             );
         }
     }
 
     #[test]
-    fn every_remote_in_the_list_is_checked() {
-        assert!(
-            with_remotes(&["gdrive:doclib", "/mnt/usb"])
-                .validate_remotes()
-                .is_ok()
+    fn explains_that_rclone_remotes_are_gone() {
+        let message = format!(
+            "{:#}",
+            validate_store(Path::new("gdrive:library")).unwrap_err()
         );
-        // One bad entry invalidates the config, wherever it sits.
-        assert!(
-            with_remotes(&["gdrive:doclib", "books"])
-                .validate_remotes()
-                .is_err()
-        );
-        assert!(
-            with_remotes(&["books", "gdrive:doclib"])
-                .validate_remotes()
-                .is_err()
-        );
+        assert!(message.contains("rclone"), "got {message}");
+        // A path containing a colon further along is still a path.
+        assert!(validate_store(Path::new("/mnt/my:disk/library")).is_ok());
+    }
+
+    #[test]
+    fn every_store_in_the_list_is_checked() {
+        assert!(with_stores(&["/a", "/b"]).validate_stores().is_ok());
+        assert!(with_stores(&["/a", "relative"]).validate_stores().is_err());
+        assert!(with_stores(&["relative", "/a"]).validate_stores().is_err());
     }
 
     #[test]
     fn rejects_an_empty_list() {
-        assert!(with_remotes(&[]).validate_remotes().is_err());
-        assert!(Config::default().validate_remotes().is_err());
+        assert!(with_stores(&[]).validate_stores().is_err());
+        assert!(Config::default().validate_stores().is_err());
     }
 
     #[test]
-    fn a_legacy_single_remote_becomes_a_one_element_list() {
+    fn a_legacy_remote_path_becomes_a_store() {
         let mut cfg: Config =
-            toml::from_str("remote = \"gdrive:doclib\"\ncache_max_bytes = 0\n\n[openers]\n")
+            toml::from_str("remote = \"/home/you/library\"\ncache_max_bytes = 0\n\n[openers]\n")
                 .unwrap();
-        cfg.absorb_legacy_remote();
-        assert_eq!(cfg.remotes, vec!["gdrive:doclib"]);
+        cfg.absorb_legacy_keys();
+        assert_eq!(cfg.stores, vec![PathBuf::from("/home/you/library")]);
     }
 
     #[test]
-    fn an_explicit_list_wins_over_the_legacy_key() {
+    fn an_explicit_store_list_wins_over_legacy_keys() {
         let mut cfg: Config = toml::from_str(
-            "remote = \"old:x\"\nremotes = [\"new:y\"]\ncache_max_bytes = 0\n\n[openers]\n",
+            "remote = \"/old\"\nremotes = [\"/older\"]\nstores = [\"/new\"]\n\
+             cache_max_bytes = 0\n\n[openers]\n",
         )
         .unwrap();
-        cfg.absorb_legacy_remote();
-        assert_eq!(cfg.remotes, vec!["new:y"]);
+        cfg.absorb_legacy_keys();
+        assert_eq!(cfg.stores, vec![PathBuf::from("/new")]);
+    }
+
+    #[test]
+    fn expands_a_leading_tilde() {
+        let home = std::env::var("HOME").unwrap_or_default();
+        assert_eq!(
+            expand_home(Path::new("~/library")),
+            PathBuf::from(format!("{home}/library"))
+        );
+        // Only a leading tilde, and only as a whole component.
+        assert_eq!(
+            expand_home(Path::new("/mnt/~backup")),
+            PathBuf::from("/mnt/~backup")
+        );
     }
 }

@@ -22,7 +22,7 @@ pub fn run(
     auto: bool,
     forced_kind: Option<Kind>,
 ) -> Result<()> {
-    let reachable = storage::check_ready(cfg)?;
+    let available = storage::check_ready(cfg)?;
 
     let files = collect(path);
     if files.is_empty() {
@@ -36,7 +36,7 @@ pub fn run(
 
     for (index, file) in files.iter().enumerate() {
         println!("[{}/{}] {}", index + 1, files.len(), file.display());
-        match import_one(conn, cfg, &reachable.usable, file, auto, forced_kind) {
+        match import_one(conn, cfg, &available.usable, file, auto, forced_kind) {
             Ok(true) => added += 1,
             Ok(false) => skipped += 1,
             // Ctrl-C means stop, not "fail this one and carry on through the
@@ -82,7 +82,7 @@ fn collect(path: &Path) -> Vec<PathBuf> {
 fn import_one(
     conn: &Connection,
     cfg: &Config,
-    remotes: &[String],
+    stores: &[PathBuf],
     file: &Path,
     auto: bool,
     forced_kind: Option<Kind>,
@@ -125,7 +125,7 @@ fn import_one(
     };
 
     let cached = cache::store(cfg, file, &hash, &ext)?;
-    upload_everywhere(remotes, &cached, &doc.remote_path)?;
+    copy_into_all(stores, &cached, &doc.remote_path)?;
 
     db::insert(conn, &doc)?;
     // These bytes are catalogued again, so any pending purge no longer applies.
@@ -142,23 +142,24 @@ fn import_one(
     Ok(true)
 }
 
-/// Push to every remote. A single failure is not fatal — `doclib update` will
-/// copy the file across later — but landing nowhere would leave the catalog
-/// pointing at bytes that only exist in the cache, which `cache prune` deletes.
-fn upload_everywhere(remotes: &[String], local: &std::path::Path, remote_rel: &str) -> Result<()> {
-    print!("  uploading...");
+/// Copy into every store. A single failure is not fatal — `doclib update`
+/// will copy the file across later — but landing nowhere would leave the
+/// catalog pointing at bytes that only exist in the cache, which
+/// `cache prune` deletes.
+fn copy_into_all(stores: &[PathBuf], local: &Path, rel: &str) -> Result<()> {
+    print!("  storing...");
     let mut stored = 0;
     let mut failures = Vec::new();
 
-    for remote in remotes {
-        match storage::upload(remote, local, remote_rel) {
+    for store in stores {
+        match storage::put(store, local, rel) {
             Ok(()) => {
-                print!(" {remote} ok");
+                print!(" {} ok", store.display());
                 stored += 1;
             }
             Err(e) => {
-                print!(" {remote} FAILED");
-                failures.push(format!("    {remote}: {e:#}"));
+                print!(" {} FAILED", store.display());
+                failures.push(format!("    {}: {e:#}", store.display()));
             }
         }
     }
@@ -168,12 +169,12 @@ fn upload_everywhere(remotes: &[String], local: &std::path::Path, remote_rel: &s
     }
 
     if stored == 0 {
-        anyhow::bail!("no remote accepted the file");
+        anyhow::bail!("no store accepted the file");
     }
     if !failures.is_empty() {
         println!(
-            "    stored on {stored} of {} remotes — `doclib update` will finish it",
-            remotes.len()
+            "    stored in {stored} of {} stores — `doclib update` will finish it",
+            stores.len()
         );
     }
     Ok(())
@@ -261,7 +262,7 @@ fn build(
         ext: ext.to_string(),
         size,
         content_hash: hash.to_string(),
-        remote_path: cfg.remote_path(hash, ext),
+        remote_path: cfg.stored_path(hash, ext),
         cached_at: Some(crate::now()),
         last_opened: None,
         added_at: crate::now(),

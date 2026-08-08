@@ -34,19 +34,22 @@ pub fn store(cfg: &Config, source: &Path, hash: &str, ext: &str) -> Result<PathB
     Ok(dest)
 }
 
-/// Local path for a document, pulling it back from the remote if it was evicted.
+/// Local path for a document, copying it back from a store if it was evicted.
 pub fn ensure_cached(conn: &Connection, cfg: &Config, doc: &Document) -> Result<PathBuf> {
     let path = cfg.cache_path(&doc.content_hash, &doc.ext);
     if path.exists() {
         return Ok(path);
     }
-    let reachable = crate::storage::check_ready(cfg)?;
+    let available = crate::storage::check_ready(cfg)?;
 
-    // Config order is read preference; the first remote holding it wins.
+    // Config order is read preference; the first store holding it wins.
     let mut last_error = None;
-    for remote in &reachable.usable {
-        println!("fetching {} from {remote}...", doc.title);
-        match crate::storage::download(remote, &doc.remote_path, &path) {
+    for store in &available.usable {
+        if !crate::storage::exists(store, &doc.remote_path) {
+            continue;
+        }
+        println!("copying {} from {}...", doc.title, store.display());
+        match crate::storage::get(store, &doc.remote_path, &path) {
             Ok(()) => {
                 db::mark_cached(conn, &doc.id, Some(&crate::now()))?;
                 return Ok(path);
@@ -56,8 +59,8 @@ pub fn ensure_cached(conn: &Connection, cfg: &Config, doc: &Document) -> Result<
     }
 
     match last_error {
-        Some(e) => Err(e).with_context(|| format!("no remote holds {:?}", doc.title)),
-        None => anyhow::bail!("no remote is reachable"),
+        Some(e) => Err(e).with_context(|| format!("could not read {:?}", doc.title)),
+        None => anyhow::bail!("no available store holds {:?}", doc.title),
     }
 }
 

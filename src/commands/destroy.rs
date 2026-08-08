@@ -10,17 +10,17 @@ use crate::ui;
 /// Typing `y` is too easy for something this final.
 const CONFIRMATION: &str = "destroy";
 
-pub fn run(conn: Connection, cfg: &Config, remote: bool, assume_yes: bool) -> Result<()> {
+pub fn run(conn: Connection, cfg: &Config, stores: bool, assume_yes: bool) -> Result<()> {
     let documents = db::all(&conn)?;
     let tags = db::tag_counts(&conn)?;
     let cached = cache::stats(cfg)?;
 
-    let stored: Vec<(String, String, u64)> = if remote {
-        let reachable = storage::check_ready(cfg)?;
+    let stored: Vec<(std::path::PathBuf, String, u64)> = if stores {
+        let available = storage::check_ready(cfg)?;
         let mut all = Vec::new();
-        for r in &reachable.usable {
-            for (path, size) in storage::list(r)? {
-                all.push((r.clone(), path, size));
+        for store in &available.usable {
+            for (path, size) in storage::list(store)? {
+                all.push((store.clone(), path, size));
             }
         }
         all
@@ -42,20 +42,21 @@ pub fn run(conn: Connection, cfg: &Config, remote: bool, assume_yes: bool) -> Re
         cfg.cache_dir().display()
     );
 
-    if remote {
-        for r in &cfg.remotes {
-            let files: Vec<_> = stored.iter().filter(|(from, _, _)| from == r).collect();
+    if stores {
+        for store in &cfg.stores {
+            let files: Vec<_> = stored.iter().filter(|(from, _, _)| from == store).collect();
             let bytes: u64 = files.iter().map(|(_, _, size)| size).sum();
             println!(
-                "  {} stored file(s), {}, from {r}",
+                "  {} stored file(s), {}, from {}",
                 files.len(),
-                cache::human_bytes(bytes)
+                cache::human_bytes(bytes),
+                store.display()
             );
         }
     } else {
         println!(
-            "\nthe stored files on {} remote(s) are kept. re-run with --remote to delete those too.",
-            cfg.remotes.len()
+            "\nthe files in {} store(s) are kept. re-run with --stores to delete those too.",
+            cfg.stores.len()
         );
     }
 
@@ -70,17 +71,17 @@ pub fn run(conn: Connection, cfg: &Config, remote: bool, assume_yes: bool) -> Re
     }
 
     // Remote first: if it fails, the catalog still describes what is out there.
-    let mut deleted_remote = 0;
+    let mut deleted = 0;
     for (from, path, _) in &stored {
-        match storage::delete(from, path) {
-            Ok(()) => deleted_remote += 1,
-            Err(e) => eprintln!("  failed to delete {path} from {from}: {e:#}"),
+        match storage::remove(from, path) {
+            Ok(()) => deleted += 1,
+            Err(e) => eprintln!("  failed to delete {path} from {}: {e:#}", from.display()),
         }
     }
-    if remote {
+    if stores {
         println!(
-            "deleted {deleted_remote} file(s) across {} remote(s)",
-            cfg.remotes.len()
+            "deleted {deleted} file(s) across {} store(s)",
+            cfg.stores.len()
         );
     }
 

@@ -1,84 +1,82 @@
-//! Converge every remote on the union of what they all hold.
+//! Converge every store on the union of what they all hold.
 //!
-//! Remotes are treated as append-only replicas: if a file exists on one and
-//! not another, the answer is always to copy it, never to delete it. Deletion
-//! is the job of `delete --purge`, `purge` and `destroy`, which act on every
-//! remote at once precisely so that this command cannot resurrect the file.
+//! Stores are treated as append-only replicas: if a file exists in one and not
+//! another, the answer is always to copy it, never to delete it. Deletion is
+//! the job of `delete --purge`, `purge` and `destroy`, which record what they
+//! removed so that this command cannot copy it back.
 
 use anyhow::{Result, bail};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::PathBuf;
 
 use crate::cache;
 use crate::config::Config;
 use crate::db;
 use crate::storage;
-use crate::ui;
 
 pub fn run(conn: &rusqlite::Connection, cfg: &Config, dry_run: bool) -> Result<()> {
-    let reachable = storage::check_ready(cfg)?;
+    let available = storage::check_ready(cfg)?;
 
-    if cfg.remotes.len() < 2 {
+    if cfg.stores.len() < 2 {
         bail!(
-            "update copies files between remotes, and only one is configured.\n\
-             add another to `remotes` in the config, then run this again."
+            "update copies files between stores, and only one is configured.\n\
+             add another to `stores` in the config, then run this again."
         );
     }
-    if reachable.usable.len() < 2 {
+    if available.usable.len() < 2 {
         bail!(
-            "only {} of {} remotes are reachable, so there is nothing to converge.",
-            reachable.usable.len(),
-            cfg.remotes.len()
+            "only {} of {} stores are available, so there is nothing to converge.",
+            available.usable.len(),
+            cfg.stores.len()
         );
     }
 
-    // Listing is the expensive part; do it once per remote.
-    let mut holdings: Vec<(String, HashMap<String, u64>)> = Vec::new();
-    for remote in &reachable.usable {
-        let files = storage::list(remote)?;
-        println!("{remote}: {} file(s)", files.len());
-        holdings.push((remote.clone(), files.into_iter().collect()));
+    let mut holdings: Vec<(PathBuf, HashMap<String, u64>)> = Vec::new();
+    for store in &available.usable {
+        let files = storage::list(store)?;
+        println!("{}: {} file(s)", store.display(), files.len());
+        holdings.push((store.clone(), files.into_iter().collect()));
     }
 
-    // The union is the target state for every remote. BTreeMap so the report
-    // and the copy order are stable between runs.
+    // The union is the target state for every store. BTreeMap so the report and
+    // the copy order are stable between runs.
     //
-    // Deleted files are excluded: a remote that was offline during the delete
-    // still holds a copy, and without this the union would faithfully copy it
-    // back to everywhere it was just removed from.
+    // Deleted files are excluded: a store that was disconnected during the
+    // delete still holds a copy, and without this the union would faithfully
+    // copy it back to everywhere it was just removed from.
     let deleted = db::tombstoned_paths(conn)?;
     let mut union: BTreeMap<String, u64> = BTreeMap::new();
-    let mut resurrections_avoided = 0;
+    let mut skipped = 0;
     for (_, files) in &holdings {
         for (path, size) in files {
             if deleted.contains(path) {
-                resurrections_avoided += 1;
+                skipped += 1;
                 continue;
             }
             union.insert(path.clone(), *size);
         }
     }
-    if resurrections_avoided > 0 {
+    if skipped > 0 {
         println!(
-            "\nignoring {} deleted file(s) still present on some remote — \
-             `doclib purge` removes them.",
-            deleted.len()
+            "\nignoring deleted file(s) still present in some store — \
+             `doclib purge` removes them."
         );
     }
 
     let plan: Vec<Transfer> = holdings
         .iter()
-        .flat_map(|(remote, files)| {
+        .flat_map(|(store, files)| {
             union
                 .iter()
                 .filter(|(path, _)| !files.contains_key(*path))
                 .filter_map(|(path, size)| {
-                    // Any remote that already has it will do as the source.
+                    // Any store that already has it will do as the source.
                     let source = holdings.iter().find(|(other, other_files)| {
-                        other != remote && other_files.contains_key(path)
+                        other != store && other_files.contains_key(path)
                     })?;
                     Some(Transfer {
                         source: source.0.clone(),
-                        destination: remote.clone(),
+                        destination: store.clone(),
                         path: path.clone(),
                         size: *size,
                     })
@@ -89,16 +87,16 @@ pub fn run(conn: &rusqlite::Connection, cfg: &Config, dry_run: bool) -> Result<(
 
     if plan.is_empty() {
         println!(
-            "\nall {} remote(s) already hold the same {} file(s).",
+            "\nall {} store(s) already hold the same {} file(s).",
             holdings.len(),
             union.len()
         );
-        return report_unreachable(&reachable);
+        return report_unavailable(&available);
     }
 
     print_plan(&plan, dry_run);
     if dry_run {
-        return report_unreachable(&reachable);
+        return report_unavailable(&available);
     }
 
     println!();
@@ -110,7 +108,8 @@ pub fn run(conn: &rusqlite::Connection, cfg: &Config, dry_run: bool) -> Result<(
             Err(e) => {
                 eprintln!(
                     "  failed: {} -> {}: {e:#}",
-                    transfer.path, transfer.destination
+                    transfer.path,
+                    transfer.destination.display()
                 );
                 failed += 1;
             }
@@ -125,20 +124,20 @@ pub fn run(conn: &rusqlite::Connection, cfg: &Config, dry_run: bool) -> Result<(
             String::new()
         }
     );
-    report_unreachable(&reachable)
+    report_unavailable(&available)
 }
 
 struct Transfer {
-    source: String,
-    destination: String,
+    source: PathBuf,
+    destination: PathBuf,
     path: String,
     size: u64,
 }
 
 fn print_plan(plan: &[Transfer], dry_run: bool) {
-    // Grouped by destination: "what does this remote still need" is the
-    // question a reader actually has.
-    let mut by_destination: BTreeMap<&str, (usize, u64)> = BTreeMap::new();
+    // Grouped by destination: "what does this store still need" is the question
+    // a reader actually has.
+    let mut by_destination: BTreeMap<&PathBuf, (usize, u64)> = BTreeMap::new();
     for transfer in plan {
         let entry = by_destination
             .entry(&transfer.destination)
@@ -151,7 +150,7 @@ fn print_plan(plan: &[Transfer], dry_run: bool) {
     for (destination, (count, bytes)) in &by_destination {
         println!(
             "  {}  +{count} file(s), {}",
-            ui::truncate(destination, 40),
+            destination.display(),
             cache::human_bytes(*bytes)
         );
     }
@@ -161,18 +160,22 @@ fn print_plan(plan: &[Transfer], dry_run: bool) {
             println!(
                 "    {} -> {}  ({})",
                 transfer.path,
-                transfer.destination,
+                transfer.destination.display(),
                 cache::human_bytes(transfer.size)
             );
         }
     }
 }
 
-fn report_unreachable(reachable: &storage::Reachability) -> Result<()> {
-    if !reachable.unusable.is_empty() {
-        let names: HashSet<&str> = reachable.unusable.iter().map(|(r, _)| r.as_str()).collect();
+fn report_unavailable(available: &storage::Availability) -> Result<()> {
+    if !available.unusable.is_empty() {
+        let names: HashSet<String> = available
+            .unusable
+            .iter()
+            .map(|(s, _)| s.display().to_string())
+            .collect();
         println!(
-            "\n{} remote(s) were skipped and may still be missing files: {}",
+            "\n{} store(s) were skipped and may still be missing files: {}",
             names.len(),
             names.into_iter().collect::<Vec<_>>().join(", ")
         );
