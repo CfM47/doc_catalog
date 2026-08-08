@@ -3,6 +3,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::config::{self, Config};
+use crate::storage;
 
 pub fn run(cfg: &Config, remote: Option<&str>, show: bool, path_only: bool) -> Result<()> {
     let file = config::config_path()?;
@@ -36,10 +37,19 @@ fn status(cfg: &Config) -> Result<()> {
         }
     );
     match cfg.validate_remote() {
-        Ok(()) => println!("\nremote looks usable."),
         Err(e) => println!("\n{e:#}"),
+        // Shape is only half the answer: ask rclone whether it resolves.
+        Ok(()) => match reachable(cfg) {
+            Ok(()) => println!("\nremote is reachable."),
+            Err(e) => println!("\n{e:#}"),
+        },
     }
     Ok(())
+}
+
+fn reachable(cfg: &Config) -> Result<()> {
+    storage::check_available()?;
+    storage::check_remote(cfg)
 }
 
 /// Validate before writing, so a typo is rejected while the old value is still
@@ -75,6 +85,16 @@ fn set_remote(file: &Path, remote: &str) -> Result<()> {
         .with_context(|| format!("writing {}", file.display()))?;
 
     println!("remote = {remote}");
+
+    // A warning, not a failure: configuring doclib before `rclone config` is a
+    // reasonable order to do things in.
+    let candidate = Config {
+        remote: remote.to_string(),
+        ..Default::default()
+    };
+    if let Err(e) = reachable(&candidate) {
+        eprintln!("\nwarning: {e:#}");
+    }
     Ok(())
 }
 
