@@ -84,6 +84,18 @@ enum Command {
         #[arg(default_value = "")]
         query: String,
     },
+    /// Write the catalog to JSON: the tags and corrections exist nowhere else
+    Export {
+        /// File to write; omit to print to stdout
+        file: Option<PathBuf>,
+    },
+    /// Merge a JSON backup back into the catalog
+    Restore {
+        /// Backup file written by `doclib export`
+        file: PathBuf,
+    },
+    /// Summarise the catalog and show where metadata is missing
+    Stats,
     /// Verify the remote holds every catalogued document
     Sync,
     /// Delete stored files that no catalog entry points at
@@ -156,6 +168,9 @@ fn main() -> Result<()> {
         }
         Command::Tags => commands::list::tags(&conn),
         Command::Tag { query } => commands::tag::run(&conn, query),
+        Command::Export { file } => commands::export::export(&conn, file.as_deref()),
+        Command::Restore { file } => commands::export::restore(&conn, &cfg, file),
+        Command::Stats => commands::stats::run(&conn, &cfg),
         Command::Sync => commands::sync::run(&conn, &cfg),
         Command::Purge { assume_yes } => commands::purge::run(&conn, &cfg, *assume_yes),
         Command::Cache { action } => match action {

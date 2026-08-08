@@ -277,6 +277,11 @@ pub fn find_by_hash(conn: &Connection, hash: &str) -> Result<Option<Document>> {
     Ok(conn.query_row(&sql, params![hash], from_row).optional()?)
 }
 
+pub fn find_by_id(conn: &Connection, id: &str) -> Result<Option<Document>> {
+    let sql = format!("{SELECT_DOC} WHERE id = ?1");
+    Ok(conn.query_row(&sql, params![id], from_row).optional()?)
+}
+
 pub fn all(conn: &Connection) -> Result<Vec<Document>> {
     let sql = format!("{SELECT_DOC} ORDER BY title COLLATE NOCASE");
     let mut stmt = conn.prepare(&sql)?;
@@ -388,6 +393,26 @@ pub fn tags_for(conn: &Connection, doc_id: &str) -> Result<Vec<String>> {
     )?;
     let rows = stmt.query_map(params![doc_id], |r| r.get::<_, String>(0))?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// Every tag with how many documents carry it, most used first.
+pub fn tag_counts(conn: &Connection) -> Result<Vec<(String, i64)>> {
+    let mut stmt = conn.prepare(
+        "SELECT t.name, COUNT(dt.document_id) AS uses \
+         FROM tags t LEFT JOIN document_tags dt ON dt.tag_id = t.id \
+         GROUP BY t.id ORDER BY uses DESC, t.name COLLATE NOCASE",
+    )?;
+    let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+pub fn untagged_count(conn: &Connection) -> Result<i64> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM documents d \
+         WHERE NOT EXISTS (SELECT 1 FROM document_tags dt WHERE dt.document_id = d.id)",
+        [],
+        |r| r.get(0),
+    )?)
 }
 
 pub fn all_tags(conn: &Connection) -> Result<Vec<String>> {

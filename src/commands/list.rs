@@ -12,14 +12,13 @@ pub fn run(conn: &Connection, tag: Option<&str>, kind: Option<Kind>) -> Result<(
 }
 
 pub fn tags(conn: &Connection) -> Result<()> {
-    let tags = db::all_tags(conn)?;
-    if tags.is_empty() {
+    let counts = db::tag_counts(conn)?;
+    if counts.is_empty() {
         println!("no tags yet.");
         return Ok(());
     }
-    for tag in &tags {
-        let count = db::list(conn, Some(tag), None)?.len();
-        println!("{}  {count}", ui::truncate(tag, 24));
+    for (name, uses) in &counts {
+        println!("{}  {uses}", ui::truncate(name, 24));
     }
     Ok(())
 }

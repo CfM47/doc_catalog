@@ -1,7 +1,9 @@
 use anyhow::{Result, bail};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Kind {
     Book,
     Article,
@@ -33,7 +35,7 @@ impl fmt::Display for Kind {
 /// A catalogued file. Identity is `id` (stable). `content_hash` is the current
 /// bytes: used for dedupe on import and integrity checks on sync, never as
 /// identity.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Document {
     pub id: String,
     pub kind: Kind,
