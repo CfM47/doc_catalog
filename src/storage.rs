@@ -66,6 +66,18 @@ pub fn download(cfg: &Config, remote_rel: &str, dest: &Path) -> Result<()> {
     Ok(())
 }
 
+pub fn delete(cfg: &Config, remote_rel: &str) -> Result<()> {
+    let target = remote_url(cfg, remote_rel);
+    let out = run(&["deletefile", &target])?;
+    if !out.status.success() {
+        bail!(
+            "rclone deletefile {target} failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
 pub fn exists(cfg: &Config, remote_rel: &str) -> Result<bool> {
     let target = remote_url(cfg, remote_rel);
     let out = run(&["lsjson", "--stat", &target])?;

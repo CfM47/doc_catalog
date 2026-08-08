@@ -155,6 +155,52 @@ pub fn insert(conn: &Connection, doc: &Document) -> Result<()> {
     Ok(())
 }
 
+/// Update the editable metadata. The bytes-related columns (hash, size,
+/// remote_path) are deliberately not touched: they describe the file, not the
+/// record, and only import may set them.
+pub fn update(conn: &Connection, doc: &Document) -> Result<()> {
+    conn.execute(
+        "UPDATE documents SET kind = ?2, title = ?3, authors = ?4, year = ?5,
+            publisher = ?6, edition = ?7, isbn = ?8, journal = ?9, volume = ?10,
+            issue = ?11, pages = ?12, doi = ?13
+         WHERE id = ?1",
+        params![
+            doc.id,
+            doc.kind.as_str(),
+            doc.title,
+            doc.authors,
+            doc.year,
+            doc.publisher,
+            doc.edition,
+            doc.isbn,
+            doc.journal,
+            doc.volume,
+            doc.issue,
+            doc.pages,
+            doc.doi,
+        ],
+    )?;
+    Ok(())
+}
+
+/// Remove the catalog row. Tag links cascade; the FTS entry is dropped by the
+/// delete trigger. The stored file is not touched here.
+pub fn delete(conn: &Connection, id: &str) -> Result<()> {
+    conn.execute("DELETE FROM documents WHERE id = ?1", params![id])?;
+    drop_orphan_tags(conn)?;
+    Ok(())
+}
+
+/// A tag nobody uses is noise in the known-tags list and shows up as a zero
+/// count in `doclib tags`, so it goes when its last document does.
+fn drop_orphan_tags(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "DELETE FROM tags WHERE id NOT IN (SELECT tag_id FROM document_tags)",
+        [],
+    )?;
+    Ok(())
+}
+
 pub fn find_by_hash(conn: &Connection, hash: &str) -> Result<Option<Document>> {
     let sql = format!("{SELECT_DOC} WHERE content_hash = ?1");
     Ok(conn.query_row(&sql, params![hash], from_row).optional()?)
@@ -259,6 +305,7 @@ pub fn set_tags(conn: &Connection, doc_id: &str, tags: &[String]) -> Result<()> 
             params![doc_id, tag_id],
         )?;
     }
+    drop_orphan_tags(&tx)?;
     tx.commit()?;
     Ok(())
 }
@@ -388,8 +435,21 @@ mod tests {
 
         set_tags(&conn, "a", &["types".into()]).unwrap();
         assert_eq!(tags_for(&conn, "a").unwrap(), vec!["types"]);
-        // The tag row survives so it stays available for other documents.
-        assert_eq!(all_tags(&conn).unwrap(), vec!["theory", "types"]);
+        // "theory" now has no documents, so it stops being a known tag.
+        assert_eq!(all_tags(&conn).unwrap(), vec!["types"]);
+    }
+
+    #[test]
+    fn a_tag_shared_with_another_document_survives() {
+        let conn = memory_db();
+        insert(&conn, &doc("a", "First", "X", Kind::Book)).unwrap();
+        insert(&conn, &doc("b", "Second", "Y", Kind::Book)).unwrap();
+        set_tags(&conn, "a", &["shared".into()]).unwrap();
+        set_tags(&conn, "b", &["shared".into()]).unwrap();
+
+        delete(&conn, "a").unwrap();
+        assert_eq!(all_tags(&conn).unwrap(), vec!["shared"]);
+        assert_eq!(tags_for(&conn, "b").unwrap(), vec!["shared"]);
     }
 
     #[test]
@@ -409,6 +469,61 @@ mod tests {
         );
         assert_eq!(list(&conn, None, Some(Kind::Book)).unwrap().len(), 1);
         assert_eq!(list(&conn, Some("missing"), None).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn update_reindexes_the_document() {
+        let conn = memory_db();
+        insert(&conn, &doc("a", "Untitled Scan", "-", Kind::Book)).unwrap();
+
+        let mut fixed = find_by_hash(&conn, "hash-a").unwrap().unwrap();
+        fixed.title = "Regulated Grammars and Automata".to_string();
+        fixed.authors = Some("Alexander Meduna".to_string());
+        update(&conn, &fixed).unwrap();
+
+        assert_eq!(search(&conn, "meduna").unwrap().len(), 1);
+        // The stale title must not linger in the index.
+        assert!(search(&conn, "untitled").unwrap().is_empty());
+    }
+
+    #[test]
+    fn update_leaves_the_stored_file_columns_alone() {
+        let conn = memory_db();
+        insert(&conn, &doc("a", "Book", "Author", Kind::Book)).unwrap();
+
+        let mut tampered = find_by_hash(&conn, "hash-a").unwrap().unwrap();
+        tampered.title = "Renamed".to_string();
+        tampered.content_hash = "different".to_string();
+        tampered.remote_path = "zz/different.pdf".to_string();
+        update(&conn, &tampered).unwrap();
+
+        let stored = find_by_hash(&conn, "hash-a").unwrap().unwrap();
+        assert_eq!(stored.title, "Renamed");
+        assert_eq!(stored.remote_path, "ha/hash-a.pdf");
+    }
+
+    #[test]
+    fn delete_removes_the_row_its_tags_and_its_index_entry() {
+        let conn = memory_db();
+        insert(&conn, &doc("a", "Discarded Book", "Nobody", Kind::Book)).unwrap();
+        set_tags(&conn, "a", &["temp".into()]).unwrap();
+
+        delete(&conn, "a").unwrap();
+
+        assert!(all(&conn).unwrap().is_empty());
+        assert!(search(&conn, "discarded").unwrap().is_empty());
+        assert!(tags_for(&conn, "a").unwrap().is_empty());
+        // Nothing else used "temp", so it goes too.
+        assert!(all_tags(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn deleting_frees_the_hash_for_reimport() {
+        let conn = memory_db();
+        insert(&conn, &doc("a", "Book", "Author", Kind::Book)).unwrap();
+        delete(&conn, "a").unwrap();
+        // Same bytes, new row: the UNIQUE constraint must no longer block it.
+        assert!(insert(&conn, &doc("a", "Book", "Author", Kind::Book)).is_ok());
     }
 
     #[test]

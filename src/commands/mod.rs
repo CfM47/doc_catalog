@@ -1,4 +1,6 @@
 pub mod cache_cmd;
+pub mod delete;
+pub mod edit;
 pub mod import;
 pub mod list;
 pub mod open;

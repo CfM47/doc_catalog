@@ -10,6 +10,7 @@ pub struct Extracted {
     pub title: Option<String>,
     pub authors: Option<String>,
     pub publisher: Option<String>,
+    pub edition: Option<String>,
     pub year: Option<i64>,
     pub isbn: Option<String>,
     pub doi: Option<String>,
@@ -26,7 +27,7 @@ impl Extracted {
             ($($f:ident),*) => { $( if self.$f.is_none() { self.$f = other.$f; } )* };
         }
         fill!(
-            title, authors, publisher, year, isbn, doi, journal, volume, issue, pages
+            title, authors, publisher, edition, year, isbn, doi, journal, volume, issue, pages
         );
     }
 }

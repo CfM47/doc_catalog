@@ -51,6 +51,25 @@ enum Command {
         #[arg(default_value = "")]
         query: String,
     },
+    /// Correct the metadata on one document
+    Edit {
+        #[arg(default_value = "")]
+        query: String,
+        /// Re-fetch from OpenLibrary or Crossref before prompting
+        #[arg(long)]
+        lookup: bool,
+    },
+    /// Remove a document from the catalog
+    Delete {
+        #[arg(default_value = "")]
+        query: String,
+        /// Also delete the stored copy from the remote
+        #[arg(long)]
+        purge: bool,
+        /// Skip the confirmation prompt
+        #[arg(short = 'y', long = "yes")]
+        assume_yes: bool,
+    },
     /// List the catalog, optionally filtered
     List {
         #[arg(long)]
@@ -110,6 +129,12 @@ fn main() -> Result<()> {
         Command::Search { query } => commands::search::run(&conn, query.as_deref()),
         Command::Open { query } => commands::open::run(&conn, &cfg, query),
         Command::Show { query } => commands::show::run(&conn, &cfg, query),
+        Command::Edit { query, lookup } => commands::edit::run(&conn, query, *lookup),
+        Command::Delete {
+            query,
+            purge,
+            assume_yes,
+        } => commands::delete::run(&conn, &cfg, query, *purge, *assume_yes),
         Command::List { tag, kind } => {
             commands::list::run(&conn, tag.as_deref(), parse_kind(kind)?)
         }

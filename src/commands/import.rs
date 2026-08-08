@@ -1,5 +1,4 @@
 use anyhow::Result;
-use inquire::{Select, Text};
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -12,6 +11,7 @@ use crate::lookup;
 use crate::metadata::{self, Extracted};
 use crate::model::{Document, Kind};
 use crate::storage;
+use crate::ui;
 
 const EXTENSIONS: [&str; 6] = ["pdf", "epub", "djvu", "mobi", "azw3", "chm"];
 
@@ -94,7 +94,7 @@ fn import_one(
     let kind = match forced_kind {
         Some(k) => k,
         None if auto => guess_kind(&found),
-        None => ask_kind(guess_kind(&found))?,
+        None => ui::ask_kind(guess_kind(&found))?,
     };
 
     // An identifier is worth more than every embedded field combined: one
@@ -104,7 +104,7 @@ fn import_one(
     let doc = if auto {
         build(&found, kind, &ext, size, &hash, cfg)
     } else {
-        let filled = prompt_fields(&found, kind)?;
+        let filled = ui::prompt_fields(&found, kind, "  ")?;
         build(&filled, kind, &ext, size, &hash, cfg)
     };
 
@@ -116,7 +116,7 @@ fn import_one(
     db::insert(conn, &doc)?;
 
     if !auto {
-        let tags = ask_tags(conn)?;
+        let tags = ui::ask_tags(conn, &[], "  ")?;
         if !tags.is_empty() {
             db::set_tags(conn, &doc.id, &tags)?;
         }
@@ -134,15 +134,6 @@ fn guess_kind(found: &Extracted) -> Kind {
     }
 }
 
-fn ask_kind(default: Kind) -> Result<Kind> {
-    let options = match default {
-        Kind::Book => vec!["book", "article"],
-        Kind::Article => vec!["article", "book"],
-    };
-    let choice = Select::new("  kind", options).prompt()?;
-    Kind::parse(choice)
-}
-
 fn enrich(found: &mut Extracted, kind: Kind, auto: bool) -> Result<()> {
     let identifier = match kind {
         Kind::Article => found.doi.clone(),
@@ -157,13 +148,7 @@ fn enrich(found: &mut Extracted, kind: Kind, auto: bool) -> Result<()> {
                 Kind::Article => "  DOI (blank to skip lookup)",
                 Kind::Book => "  ISBN (blank to skip lookup)",
             };
-            let answer = Text::new(label).prompt()?;
-            let answer = answer.trim().to_string();
-            if answer.is_empty() {
-                None
-            } else {
-                Some(answer)
-            }
+            ui::ask_opt(label, None)?
         }
     };
 
@@ -194,59 +179,6 @@ fn enrich(found: &mut Extracted, kind: Kind, auto: bool) -> Result<()> {
     Ok(())
 }
 
-fn prompt_fields(found: &Extracted, kind: Kind) -> Result<Extracted> {
-    let mut out = found.clone();
-    out.title = Some(ask("  title", found.title.as_deref())?);
-    out.authors = ask_opt("  authors", found.authors.as_deref())?;
-    out.year = ask_opt("  year", found.year.map(|y| y.to_string()).as_deref())?
-        .and_then(|y| y.parse::<i64>().ok());
-
-    match kind {
-        Kind::Book => {
-            out.publisher = ask_opt("  publisher", found.publisher.as_deref())?;
-            out.isbn = ask_opt("  isbn", found.isbn.as_deref())?;
-        }
-        Kind::Article => {
-            out.journal = ask_opt("  journal", found.journal.as_deref())?;
-            out.volume = ask_opt("  volume", found.volume.as_deref())?;
-            out.issue = ask_opt("  issue", found.issue.as_deref())?;
-            out.pages = ask_opt("  pages", found.pages.as_deref())?;
-            out.doi = ask_opt("  doi", found.doi.as_deref())?;
-        }
-    }
-    Ok(out)
-}
-
-fn ask(label: &str, default: Option<&str>) -> Result<String> {
-    let mut prompt = Text::new(label);
-    if let Some(default) = default {
-        prompt = prompt.with_initial_value(default);
-    }
-    Ok(prompt.prompt()?.trim().to_string())
-}
-
-fn ask_opt(label: &str, default: Option<&str>) -> Result<Option<String>> {
-    let answer = ask(label, default)?;
-    Ok(if answer.is_empty() {
-        None
-    } else {
-        Some(answer)
-    })
-}
-
-fn ask_tags(conn: &Connection) -> Result<Vec<String>> {
-    let known = db::all_tags(conn)?;
-    if !known.is_empty() {
-        println!("  existing tags: {}", known.join(", "));
-    }
-    let answer = Text::new("  tags (comma separated)").prompt()?;
-    Ok(answer
-        .split(',')
-        .map(|t| t.trim().to_string())
-        .filter(|t| !t.is_empty())
-        .collect())
-}
-
 fn build(
     found: &Extracted,
     kind: Kind,
@@ -266,7 +198,7 @@ fn build(
         authors: found.authors.clone(),
         year: found.year,
         publisher: found.publisher.clone(),
-        edition: None,
+        edition: found.edition.clone(),
         isbn: found.isbn.clone(),
         journal: found.journal.clone(),
         volume: found.volume.clone(),

@@ -1,10 +1,11 @@
 use anyhow::Result;
-use inquire::Select;
+use inquire::{Confirm, Select, Text};
 use rusqlite::Connection;
 use std::fmt;
 
 use crate::db;
-use crate::model::Document;
+use crate::metadata::Extracted;
+use crate::model::{Document, Kind};
 
 pub fn truncate(text: &str, width: usize) -> String {
     let count = text.chars().count();
@@ -68,6 +69,84 @@ pub fn pick(docs: Vec<Document>, prompt: &str) -> Result<Option<Document>> {
         | Err(inquire::InquireError::OperationInterrupted) => Ok(None),
         Err(e) => Err(e.into()),
     }
+}
+
+pub fn ask(label: &str, default: Option<&str>) -> Result<String> {
+    let mut prompt = Text::new(label);
+    if let Some(default) = default {
+        prompt = prompt.with_initial_value(default);
+    }
+    Ok(prompt.prompt()?.trim().to_string())
+}
+
+pub fn ask_opt(label: &str, default: Option<&str>) -> Result<Option<String>> {
+    let answer = ask(label, default)?;
+    Ok(if answer.is_empty() {
+        None
+    } else {
+        Some(answer)
+    })
+}
+
+pub fn confirm(label: &str) -> Result<bool> {
+    match Confirm::new(label).with_default(false).prompt() {
+        Ok(answer) => Ok(answer),
+        Err(inquire::InquireError::OperationCanceled)
+        | Err(inquire::InquireError::OperationInterrupted) => Ok(false),
+        Err(e) => Err(e.into()),
+    }
+}
+
+pub fn ask_kind(default: Kind) -> Result<Kind> {
+    let options = match default {
+        Kind::Book => vec!["book", "article"],
+        Kind::Article => vec!["article", "book"],
+    };
+    Kind::parse(Select::new("  kind", options).prompt()?)
+}
+
+/// Prompt for every field this kind uses, pre-filled with what is already
+/// known. Shared by `import` and `edit` so both ask the same questions.
+pub fn prompt_fields(found: &Extracted, kind: Kind, indent: &str) -> Result<Extracted> {
+    let label = |name: &str| format!("{indent}{name}");
+    let mut out = found.clone();
+
+    out.title = Some(ask(&label("title"), found.title.as_deref())?);
+    out.authors = ask_opt(&label("authors"), found.authors.as_deref())?;
+    out.year = ask_opt(&label("year"), found.year.map(|y| y.to_string()).as_deref())?
+        .and_then(|y| y.parse::<i64>().ok());
+
+    match kind {
+        Kind::Book => {
+            out.publisher = ask_opt(&label("publisher"), found.publisher.as_deref())?;
+            out.edition = ask_opt(&label("edition"), found.edition.as_deref())?;
+            out.isbn = ask_opt(&label("isbn"), found.isbn.as_deref())?;
+        }
+        Kind::Article => {
+            out.journal = ask_opt(&label("journal"), found.journal.as_deref())?;
+            out.volume = ask_opt(&label("volume"), found.volume.as_deref())?;
+            out.issue = ask_opt(&label("issue"), found.issue.as_deref())?;
+            out.pages = ask_opt(&label("pages"), found.pages.as_deref())?;
+            out.doi = ask_opt(&label("doi"), found.doi.as_deref())?;
+        }
+    }
+    Ok(out)
+}
+
+pub fn ask_tags(conn: &Connection, current: &[String], label: &str) -> Result<Vec<String>> {
+    let known = db::all_tags(conn)?;
+    if !known.is_empty() {
+        println!("{label}known tags: {}", known.join(", "));
+    }
+    let answer = ask(
+        &format!("{label}tags (comma separated)"),
+        Some(&current.join(", ")),
+    )?;
+    Ok(answer
+        .split(',')
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect())
 }
 
 /// Search, then fall through to an interactive pick: no matches means picking
