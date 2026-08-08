@@ -39,6 +39,15 @@ pub fn run(
         match import_one(conn, cfg, file, auto, forced_kind) {
             Ok(true) => added += 1,
             Ok(false) => skipped += 1,
+            // Ctrl-C means stop, not "fail this one and carry on through the
+            // remaining three hundred files".
+            Err(e) if ui::was_interrupted(&e) => {
+                println!(
+                    "\ninterrupted — imported {added}, {} left.",
+                    files.len() - index
+                );
+                return Ok(());
+            }
             Err(e) => {
                 eprintln!("  failed: {e:#}");
                 skipped += 1;
@@ -94,7 +103,13 @@ fn import_one(
     let kind = match forced_kind {
         Some(k) => k,
         None if auto => guess_kind(&found),
-        None => ui::ask_kind(guess_kind(&found))?,
+        None => match ui::ask_kind_or_skip(guess_kind(&found))? {
+            Some(kind) => kind,
+            None => {
+                println!("  skipped.");
+                return Ok(false);
+            }
+        },
     };
 
     // An identifier is worth more than every embedded field combined: one

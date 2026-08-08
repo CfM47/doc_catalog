@@ -97,12 +97,41 @@ pub fn confirm(label: &str) -> Result<bool> {
     }
 }
 
-pub fn ask_kind(default: Kind) -> Result<Kind> {
-    let options = match default {
+fn kind_options(default: Kind) -> Vec<&'static str> {
+    match default {
         Kind::Book => vec!["book", "article"],
         Kind::Article => vec!["article", "book"],
-    };
-    Kind::parse(Select::new("  kind", options).prompt()?)
+    }
+}
+
+pub fn ask_kind(default: Kind) -> Result<Kind> {
+    Kind::parse(Select::new("  kind", kind_options(default)).prompt()?)
+}
+
+const SKIP: &str = "skip this file";
+
+/// Like `ask_kind`, plus a way out. Typing `s` filters the list down to the
+/// skip entry, and Escape skips as well — abandoning one file partway through
+/// a long import should not abandon the import.
+pub fn ask_kind_or_skip(default: Kind) -> Result<Option<Kind>> {
+    let mut options = kind_options(default);
+    options.push(SKIP);
+
+    match Select::new("  kind", options).prompt() {
+        Ok(choice) if choice == SKIP => Ok(None),
+        Ok(choice) => Ok(Some(Kind::parse(choice)?)),
+        Err(inquire::InquireError::OperationCanceled) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// True when the user hit Ctrl-C. Escape means "not this one"; Ctrl-C means
+/// "stop", and a per-item loop has to tell them apart.
+pub fn was_interrupted(error: &anyhow::Error) -> bool {
+    matches!(
+        error.downcast_ref::<inquire::InquireError>(),
+        Some(inquire::InquireError::OperationInterrupted)
+    )
 }
 
 /// Prompt for every field this kind uses, pre-filled with what is already
