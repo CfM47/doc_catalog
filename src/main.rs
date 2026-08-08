@@ -97,8 +97,18 @@ enum Command {
         #[command(subcommand)]
         action: CacheAction,
     },
-    /// Print the config file path
-    Config,
+    /// Open the config in $EDITOR, or change one setting directly
+    Config {
+        /// Set the storage remote and exit, without opening an editor
+        #[arg(long, value_name = "REMOTE")]
+        remote: Option<String>,
+        /// Print the current settings instead of editing
+        #[arg(long)]
+        show: bool,
+        /// Print only the config file path, for scripting
+        #[arg(long)]
+        path: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -152,22 +162,8 @@ fn main() -> Result<()> {
             CacheAction::Status => commands::cache_cmd::status(&cfg),
             CacheAction::Prune { max } => commands::cache_cmd::prune(&conn, &cfg, *max),
         },
-        Command::Config => {
-            println!("config  {}", config::config_path()?.display());
-            println!("data    {}", cfg.data_dir.display());
-            println!(
-                "remote  {}",
-                if cfg.remote.is_empty() {
-                    "(unset)"
-                } else {
-                    &cfg.remote
-                }
-            );
-            match cfg.validate_remote() {
-                Ok(()) => println!("\nremote looks usable."),
-                Err(e) => println!("\n{e:#}"),
-            }
-            Ok(())
+        Command::Config { remote, show, path } => {
+            commands::config_cmd::run(&cfg, remote.as_deref(), *show, *path)
         }
     }
 }

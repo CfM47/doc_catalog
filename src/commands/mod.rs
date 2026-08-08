@@ -1,4 +1,5 @@
 pub mod cache_cmd;
+pub mod config_cmd;
 pub mod delete;
 pub mod edit;
 pub mod import;
