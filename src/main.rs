@@ -46,6 +46,11 @@ enum Command {
         #[arg(default_value = "")]
         query: String,
     },
+    /// Print every stored field for one document
+    Show {
+        #[arg(default_value = "")]
+        query: String,
+    },
     /// List the catalog, optionally filtered
     List {
         #[arg(long)]
@@ -104,6 +109,7 @@ fn main() -> Result<()> {
         }
         Command::Search { query } => commands::search::run(&conn, query.as_deref()),
         Command::Open { query } => commands::open::run(&conn, &cfg, query),
+        Command::Show { query } => commands::show::run(&conn, &cfg, query),
         Command::List { tag, kind } => {
             commands::list::run(&conn, tag.as_deref(), parse_kind(kind)?)
         }
