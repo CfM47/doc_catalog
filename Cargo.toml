@@ -1,9 +1,9 @@
 [package]
 name = "doclib"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.88"
-description = "Tag-indexed CLI catalog for books and articles, with rclone-backed storage"
+description = "Tag-indexed CLI catalog for books and articles, replicated across plain folders"
 authors = ["Jossué Arteche Muñoz"]
 license = "MIT"
 readme = "README.md"

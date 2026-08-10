@@ -45,7 +45,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Copy files into the catalog and upload them to the remote
+    /// Copy files into the catalog and into every store
     Import {
         /// File or directory to scan
         path: PathBuf,
@@ -91,7 +91,7 @@ enum Command {
     Delete {
         #[arg(default_value = "")]
         query: String,
-        /// Also delete the stored copy from the remote
+        /// Also delete the file from every store
         #[arg(long)]
         purge: bool,
         /// Skip the confirmation prompt
