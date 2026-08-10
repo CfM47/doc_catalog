@@ -185,8 +185,6 @@ doclib restore catalog.json
 doclib sync
 ```
 
-[![Star this repo](https://shields.io)](https://github.com)
-
 ## License
 
 MIT — see [LICENSE](LICENSE).
