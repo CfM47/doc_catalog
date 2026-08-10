@@ -1,5 +1,6 @@
 pub mod cache_cmd;
 pub mod config_cmd;
+pub mod copy;
 pub mod delete;
 pub mod destroy;
 pub mod edit;

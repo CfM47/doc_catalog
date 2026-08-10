@@ -63,6 +63,17 @@ enum Command {
         #[arg(default_value = "")]
         query: String,
     },
+    /// Copy a document out under a readable name, for an e-reader or a phone
+    Copy {
+        #[arg(default_value = "")]
+        query: String,
+        /// Folder to copy into
+        #[arg(long = "to", value_name = "DIR")]
+        destination: PathBuf,
+        /// Copy everything carrying this tag instead of one document
+        #[arg(long)]
+        tag: Option<String>,
+    },
     /// Print every stored field for one document
     Show {
         #[arg(default_value = "")]
@@ -221,6 +232,11 @@ fn main() -> Result<()> {
         }
         Command::Search { query } => commands::search::run(&conn, query.as_deref()),
         Command::Open { query } => commands::open::run(&conn, &cfg, query),
+        Command::Copy {
+            query,
+            destination,
+            tag,
+        } => commands::copy::run(&conn, &cfg, query, destination, tag.as_deref()),
         Command::Show { query } => commands::show::run(&conn, &cfg, query),
         Command::Edit { query, lookup } => commands::edit::run(&conn, query, *lookup),
         Command::Delete {
