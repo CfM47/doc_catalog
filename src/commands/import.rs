@@ -35,6 +35,16 @@ pub fn run(
     let mut skipped = 0;
 
     for (index, file) in files.iter().enumerate() {
+        // One book per screen: with a few hundred to get through, the previous
+        // book's prompts scrolling above the current one is just clutter. Left
+        // alone under --auto, where the point is to watch the log go by.
+        if !auto {
+            ui::clear_screen();
+            println!(
+                "importing {}  ·  added {added}, skipped {skipped}\n",
+                path.display()
+            );
+        }
         println!("[{}/{}] {}", index + 1, files.len(), file.display());
         match import_one(conn, cfg, &available.usable, file, auto, forced_kind) {
             Ok(true) => added += 1,

@@ -168,6 +168,22 @@ enum CacheAction {
     },
 }
 
+/// Rust sets SIGPIPE to be ignored at startup, so `doclib list | head` turns
+/// every later `println!` into a panic instead of ending the process quietly.
+/// Restore the default: a reader that stops listening should end the program,
+/// not crash it.
+#[cfg(unix)]
+fn restore_sigpipe() {
+    // SAFETY: resetting a signal to its default disposition is
+    // async-signal-safe, and this runs before any thread exists.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+}
+
+#[cfg(not(unix))]
+fn restore_sigpipe() {}
+
 /// Single timestamp format across the schema.
 pub fn now() -> String {
     chrono::Utc::now().to_rfc3339()
@@ -181,6 +197,7 @@ fn parse_kind(value: &Option<String>) -> Result<Option<Kind>> {
 }
 
 fn main() -> Result<()> {
+    restore_sigpipe();
     let cli = Cli::parse();
 
     // The config command runs before the config is read: a file that fails to

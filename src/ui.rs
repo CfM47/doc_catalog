@@ -7,6 +7,18 @@ use crate::db;
 use crate::metadata::Extracted;
 use crate::model::{Document, Kind};
 
+/// Wipe the visible screen and home the cursor, leaving scrollback intact so
+/// nothing already printed is actually lost. A no-op when stdout is not a
+/// terminal, since escape codes in a redirected log are just noise.
+pub fn clear_screen() {
+    use std::io::{IsTerminal, Write};
+    if !std::io::stdout().is_terminal() {
+        return;
+    }
+    print!("\x1b[2J\x1b[1;1H");
+    let _ = std::io::stdout().flush();
+}
+
 pub fn truncate(text: &str, width: usize) -> String {
     let count = text.chars().count();
     if count <= width {

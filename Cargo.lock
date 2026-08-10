@@ -589,6 +589,7 @@ dependencies = [
  "directories",
  "epub",
  "inquire",
+ "libc",
  "lopdf",
  "reqwest",
  "rusqlite",
