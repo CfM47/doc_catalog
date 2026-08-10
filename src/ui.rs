@@ -1,5 +1,5 @@
 use anyhow::Result;
-use inquire::{Confirm, Select, Text};
+use inquire::{Confirm, MultiSelect, Select, Text};
 use rusqlite::Connection;
 use std::fmt;
 
@@ -174,20 +174,74 @@ pub fn prompt_fields(found: &Extracted, kind: Kind, indent: &str) -> Result<Extr
     Ok(out)
 }
 
+/// First entry of the tag picker. Selecting it opens a text prompt for tags
+/// that do not exist yet, so creating one costs an extra keystroke only when
+/// you actually want one.
+const NEW_TAG: &str = "+ new tag…";
+
+/// Pick from the tags already in use, with the current ones pre-selected.
+/// Retyping a tag by hand is slow and silently creates near-duplicates —
+/// "algorithms" and "algorithm" are different tags and nothing would say so.
 pub fn ask_tags(conn: &Connection, current: &[String], label: &str) -> Result<Vec<String>> {
     let known = db::all_tags(conn)?;
-    if !known.is_empty() {
-        println!("{label}known tags: {}", known.join(", "));
+    if known.is_empty() {
+        // Nothing to choose from yet, so go straight to typing.
+        return Ok(parse_tag_list(&ask(
+            &format!("{label}tags (comma separated)"),
+            Some(&current.join(", ")),
+        )?));
     }
-    let answer = ask(
-        &format!("{label}tags (comma separated)"),
-        Some(&current.join(", ")),
-    )?;
-    Ok(answer
-        .split(',')
-        .map(|t| t.trim().to_string())
-        .filter(|t| !t.is_empty())
-        .collect())
+
+    let mut options = vec![NEW_TAG.to_string()];
+    options.extend(known.iter().cloned());
+
+    let preselected: Vec<usize> = current
+        .iter()
+        .filter_map(|tag| options.iter().position(|option| option == tag))
+        .collect();
+
+    let chosen = match MultiSelect::new(&format!("{label}tags"), options)
+        .with_default(&preselected)
+        .with_page_size(15)
+        // Clear the filter after every toggle. Keeping it would hide the tags
+        // that do not match what was typed, including ones just ticked — and
+        // the checkmarks are the only running account of what has been chosen.
+        .with_keep_filter(false)
+        .with_help_message("type to filter · space to toggle · enter to confirm")
+        .prompt()
+    {
+        Ok(chosen) => chosen,
+        // Backing out leaves the tags as they were rather than clearing them.
+        Err(inquire::InquireError::OperationCanceled)
+        | Err(inquire::InquireError::OperationInterrupted) => return Ok(current.to_vec()),
+        Err(e) => return Err(e.into()),
+    };
+
+    let wants_new = chosen.iter().any(|tag| tag == NEW_TAG);
+    let mut tags: Vec<String> = chosen.into_iter().filter(|tag| tag != NEW_TAG).collect();
+
+    if wants_new {
+        let typed = ask(&format!("{label}new tags (comma separated)"), None)?;
+        for tag in parse_tag_list(&typed) {
+            if !tags.contains(&tag) {
+                tags.push(tag);
+            }
+        }
+    }
+
+    tags.sort();
+    Ok(tags)
+}
+
+fn parse_tag_list(answer: &str) -> Vec<String> {
+    let mut tags: Vec<String> = Vec::new();
+    for tag in answer.split(',') {
+        let tag = tag.trim().to_string();
+        if !tag.is_empty() && !tags.contains(&tag) {
+            tags.push(tag);
+        }
+    }
+    tags
 }
 
 /// Search, then fall through to an interactive pick: no matches means picking
